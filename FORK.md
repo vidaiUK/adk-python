@@ -147,5 +147,6 @@ Optionally snapshot a release: `git tag -a fork-vX.Y.Z -m "..." && git push orig
 ### CI
 
 [`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) additionally
-runs the model tests on every push to `main`, so manual pushes are
-checked too.
+runs the model tests on every **code** push to `main`, so manual pushes are
+checked too. Doc-only changes (`*.md`, `LICENSE`, `docs/`, …) skip the suite —
+they cannot affect tests.

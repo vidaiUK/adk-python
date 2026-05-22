@@ -1,15 +1,30 @@
 name: fork-ci
 
 # CI for the vidaiUK/adk-python fork.
-# Runs the model tests on every push to the feature branch, and weekly
-# so upstream-incompatibility is caught on a schedule rather than mid-emergency.
+# Runs the model tests on every code push to `main`, and weekly so
+# upstream-incompatibility is caught on a schedule rather than mid-emergency.
+# Doc-only changes (see paths-ignore) skip the suite — they cannot affect tests.
 # Note: uses only static commands - no untrusted github.event.* input.
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
+      - 'assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
+      - 'assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
   schedule:
     - cron: '0 6 * * 1'  # Mondays 06:00 UTC
   workflow_dispatch: {}
