@@ -120,3 +120,8 @@ CLAUDE.md
 
 # Conformance test outputs (timestamped folders from --test mode)
 **/conformance/20*-*-*_*-*-*/
+
+# Local Testing (Custom ADK Proxy)
+local_tests/
+/capture_server.py
+/verify_proxy_routing.py

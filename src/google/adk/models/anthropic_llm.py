@@ -39,6 +39,7 @@ from anthropic import NotGiven
 from anthropic import types as anthropic_types
 from google.genai import types
 from pydantic import BaseModel
+from pydantic import Field
 from typing_extensions import override
 
 from ..utils._google_client_headers import get_tracking_headers
@@ -510,6 +511,20 @@ class AnthropicLlm(BaseLlm):
   model: str = "claude-sonnet-4-20250514"
   max_tokens: int = 8192
 
+  base_url: Optional[str] = Field(
+      default_factory=lambda: (
+          os.environ.get("ANTHROPIC_BASE_URL")
+          or os.environ.get("ADK_LLM_BASE_URL")
+      )
+  )
+  """The base URL for the Anthropic API endpoint.
+
+  Resolution order when unset explicitly:
+  ANTHROPIC_BASE_URL > ADK_LLM_BASE_URL > None. The Anthropic SDK also reads
+  ANTHROPIC_BASE_URL natively; we surface it on the Pydantic model so the
+  effective value is introspectable and testable.
+  """
+
   @classmethod
   @override
   def supported_models(cls) -> list[str]:
@@ -710,7 +725,7 @@ class AnthropicLlm(BaseLlm):
 
   @cached_property
   def _anthropic_client(self) -> AsyncAnthropic:
-    return AsyncAnthropic()
+    return AsyncAnthropic(base_url=self.base_url)
 
 
 class Claude(AnthropicLlm):
@@ -748,4 +763,5 @@ class Claude(AnthropicLlm):
         project_id=project_id,
         region=location,
         default_headers=get_tracking_headers(),
+        base_url=self.base_url,
     )

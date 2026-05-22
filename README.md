@@ -1,3 +1,21 @@
+<!-- FORK-NOTICE-START -->
+> ## ⚡ This is a Fork
+>
+> **`vidaiUK/adk-python`** — stock Google ADK plus environment-variable
+> configuration of LLM `base_url` (e.g. for routing through a local proxy).
+> This was [declined upstream](https://github.com/google/adk-python/issues/5383);
+> the fork is its permanent home. **Open issues/PRs here, not upstream.**
+>
+> **Install (pin the tag, not the branch):**
+> ```
+> pip install "git+https://github.com/vidaiUK/adk-python.git@fork-v2.0.0"
+> ```
+>
+> **Env vars:** `ADK_LLM_BASE_URL` works for every provider; each provider
+> also honors its own (`ADK_GEMINI_BASE_URL`, `ANTHROPIC_BASE_URL`,
+> `OPENAI_API_BASE`, …). See **[FORK.md](FORK.md)** for the full table.
+<!-- FORK-NOTICE-END -->
+
 # Agent Development Kit (ADK) 2.0
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)

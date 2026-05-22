@@ -19,6 +19,7 @@ import contextlib
 import copy
 from functools import cached_property
 import logging
+import os
 import re
 from typing import Any
 from typing import AsyncGenerator
@@ -31,6 +32,7 @@ from urllib.parse import urlunparse
 
 from google.genai import types
 from google.genai.errors import ClientError
+from pydantic import Field
 from typing_extensions import override
 
 from ..utils._google_client_headers import get_tracking_headers
@@ -114,8 +116,18 @@ class Gemini(BaseLlm):
 
   model: str = 'gemini-2.5-flash'
 
-  base_url: Optional[str] = None
-  """The base URL for the AI platform service endpoint."""
+  base_url: Optional[str] = Field(
+      default_factory=lambda: (
+          os.environ.get('ADK_GEMINI_BASE_URL')
+          or os.environ.get('ADK_VERTEX_BASE_URL')
+          or os.environ.get('ADK_LLM_BASE_URL')
+      )
+  )
+  """The base URL for the Gemini or Vertex AI API endpoint.
+
+  Resolution order when unset explicitly:
+  ADK_GEMINI_BASE_URL > ADK_VERTEX_BASE_URL > ADK_LLM_BASE_URL > None.
+  """
 
   speech_config: Optional[types.SpeechConfig] = None
 

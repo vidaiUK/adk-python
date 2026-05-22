@@ -2158,12 +2158,33 @@ def _redirect_litellm_loggers_to_stdout() -> None:
         handler.stream = sys.stdout
 
 
+_VERSIONED_PATH_RE = re.compile(r"/v\d+(?:/|$)")
+
+
+def _resolve_litellm_base_url() -> Optional[str]:
+  """Resolve LiteLlm base_url from env vars.
+
+  SDK-native vars (LITELLM_API_BASE, OPENAI_API_BASE, OPENAI_BASE_URL) are
+  returned verbatim. When falling back to the framework-wide ADK_LLM_BASE_URL,
+  ``/v1`` is appended if the URL lacks a version path, so OpenAI-compatible
+  proxies like Vidai work as a drop-in replacement across providers.
+  """
+  for var in ("LITELLM_API_BASE", "OPENAI_API_BASE", "OPENAI_BASE_URL"):
+    if value := os.environ.get(var):
+      return value
+  if value := os.environ.get("ADK_LLM_BASE_URL"):
+    if not _VERSIONED_PATH_RE.search(value):
+      return value.rstrip("/") + "/v1"
+    return value
+  return None
+
+
 class LiteLlm(BaseLlm):
   """Wrapper around litellm.
 
   This wrapper can be used with any of the models supported by litellm. The
-  environment variable(s) needed for authenticating with the model endpoint must
-  be set prior to instantiating this class.
+  environment variable(s) needed for authenticating with the model endpoint
+  must be set prior to instantiating this class.
 
   Example usage:
   ```
@@ -2179,6 +2200,24 @@ class LiteLlm(BaseLlm):
   Attributes:
     model: The name of the LiteLlm model.
     llm_client: The LLM client to use for the model.
+  """
+
+  base_url: Optional[str] = Field(default_factory=lambda: _resolve_litellm_base_url())
+  """The base URL for the LiteLLM API endpoint.
+
+  Resolution order when unset explicitly:
+  LITELLM_API_BASE > OPENAI_API_BASE > OPENAI_BASE_URL > ADK_LLM_BASE_URL.
+
+  The first three are honored verbatim because LiteLLM's OpenAI-compatible
+  providers read them natively; users setting them are assumed to already
+  include any required path (e.g. ``/v1``).
+
+  ADK_LLM_BASE_URL is a framework-wide root for multi-provider proxies
+  (e.g. Vidai, Helicone, Portkey). Since LiteLLM's OpenAI-compatible
+  transport requires a ``/v1`` suffix, ``/v1`` is appended automatically
+  when the value is inherited from ADK_LLM_BASE_URL and does not already
+  contain a version path. Gemini and Anthropic SDKs use the same root
+  unchanged because their clients append their own versioned paths.
   """
 
   llm_client: LiteLLMClient = Field(default_factory=LiteLLMClient)
@@ -2247,6 +2286,8 @@ class LiteLlm(BaseLlm):
         "tools": tools,
         "response_format": response_format,
     }
+    if self.base_url:
+      completion_args["base_url"] = self.base_url
     completion_args.update(self._additional_args)
 
     # merge headers

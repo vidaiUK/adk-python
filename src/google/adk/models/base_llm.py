@@ -14,13 +14,16 @@
 
 from __future__ import annotations
 
+import os
 from abc import abstractmethod
 from typing import AsyncGenerator
+from typing import Optional
 from typing import TYPE_CHECKING
 
 from google.genai import types
 from pydantic import BaseModel
 from pydantic import ConfigDict
+from pydantic import Field
 
 from .base_llm_connection import BaseLlmConnection
 
@@ -40,6 +43,16 @@ class BaseLlm(BaseModel):
 
   model: str
   """The name of the LLM, e.g. gemini-2.5-flash or gemini-2.5-pro."""
+
+  base_url: Optional[str] = Field(
+      default_factory=lambda: os.environ.get("ADK_LLM_BASE_URL")
+  )
+  """The base URL for the LLM endpoint.
+
+  If unset, each subclass resolves a provider-specific env var first, then
+  falls back to ADK_LLM_BASE_URL as a framework-wide default. An explicit
+  value passed to the constructor always wins over environment variables.
+  """
 
   @classmethod
   def supported_models(cls) -> list[str]:

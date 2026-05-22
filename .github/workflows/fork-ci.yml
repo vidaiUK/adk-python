@@ -1,0 +1,28 @@
+name: fork-ci
+
+# CI for the vidaiUK/adk-python fork.
+# Runs the model tests on every push to the feature branch, and weekly
+# so upstream-incompatibility is caught on a schedule rather than mid-emergency.
+# Note: uses only static commands - no untrusted github.event.* input.
+
+on:
+  push:
+    branches: [feature/base-url]
+  pull_request:
+    branches: [feature/base-url]
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Run model tests
+        run: python -m pytest tests/unittests/models/ -q
