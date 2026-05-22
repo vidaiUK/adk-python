@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
-# Sync the vidaiUK/adk-python fork with upstream google/adk-python.
+# Manually sync the fork with upstream google/adk-python.
 #
-#   upstream  = https://github.com/google/adk-python.git  (never committed to)
-#   origin    = git@github.com:vidaiUK/adk-python.git      (our fork)
-#   main      = pristine mirror of upstream/main
-#   feature/base-url = our changes, rebased on top of upstream/main
+# Mirrors what .github/workflows/auto-sync.yml does, for local recovery when
+# an automated sync fails (merge conflict or red tests).
+#
+#   feature/base-url = integration branch (base_url patch + upstream merged in)
+#   stable           = what consumers pin; advance it only when tests pass
 #
 # Usage: ./scripts/update-fork.sh
 set -euo pipefail
 
-FEATURE_BRANCH="feature/base-url"
+INTEGRATION_BRANCH="feature/base-url"
+
+# Ensure an `upstream` remote exists.
+if ! git remote get-url upstream >/dev/null 2>&1; then
+  git remote add upstream https://github.com/google/adk-python.git
+fi
 
 echo ">> Fetching upstream..."
-git fetch upstream --prune
+git fetch upstream main --prune
 
-echo ">> Fast-forwarding main to upstream/main..."
-git checkout main
-git merge --ff-only upstream/main
-git push origin main
-
-echo ">> Rebasing ${FEATURE_BRANCH} onto upstream/main..."
-git checkout "${FEATURE_BRANCH}"
-git rebase upstream/main
+echo ">> Merging upstream/main into ${INTEGRATION_BRANCH}..."
+git checkout "${INTEGRATION_BRANCH}"
+git merge --no-edit upstream/main   # stops here if there are conflicts
 
 echo ">> Running model tests..."
 python -m pytest tests/unittests/models/ -q
 
-echo ">> Tests passed. Push with:"
-echo "   git push --force-with-lease origin ${FEATURE_BRANCH}"
+cat <<EOF
+>> Tests passed. Publish the new baseline with:
+     git push origin ${INTEGRATION_BRANCH}
+     git push origin ${INTEGRATION_BRANCH}:stable
+EOF

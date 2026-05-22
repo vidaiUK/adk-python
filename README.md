@@ -1,15 +1,27 @@
 <!-- FORK-NOTICE-START -->
 > ## ⚡ This is a Fork
 >
+> [![upstream sync](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml)
+> [![fork ci](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml)
+>
 > **`vidaiUK/adk-python`** — stock Google ADK plus environment-variable
 > configuration of LLM `base_url` (e.g. for routing through a local proxy).
 > This was [declined upstream](https://github.com/google/adk-python/issues/5383);
 > the fork is its permanent home. **Open issues/PRs here, not upstream.**
 >
-> **Install (pin the tag, not the branch):**
+> **Sync status:** the `upstream sync` badge above is green when the fork is
+> auto-synced and tested against latest ADK. If it is red, the `stable` branch
+> is **held at the last passing version** — see the open
+> [`auto-sync`](https://github.com/vidaiUK/adk-python/issues?q=is%3Aissue+is%3Aopen+label%3Aauto-sync)
+> issue for what needs manual review.
+>
+> **Install:**
 > ```
-> pip install "git+https://github.com/vidaiUK/adk-python.git@fork-v2.0.0"
+> pip install "git+https://github.com/vidaiUK/adk-python.git@stable"
 > ```
+> The `stable` branch only ever advances to a commit that passed tests against
+> the latest upstream — so `@stable` auto-updates on green syncs and is held
+> back on red ones.
 >
 > **Env vars:** `ADK_LLM_BASE_URL` works for every provider; each provider
 > also honors its own (`ADK_GEMINI_BASE_URL`, `ANTHROPIC_BASE_URL`,

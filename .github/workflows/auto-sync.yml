@@ -1,0 +1,135 @@
+name: auto-sync-upstream
+
+# Automatically syncs the fork with upstream google/adk-python.
+#
+# Flow:
+#   1. Merge upstream/main into feature/base-url (the integration branch).
+#   2. If the merge conflicts -> stop, open an issue, leave `stable` untouched.
+#   3. If clean -> install + run the model tests.
+#   4. Tests pass -> fast-forward `stable` to the new commit (the new baseline).
+#   5. Tests fail -> stop, open an issue, leave `stable` untouched.
+#
+# Consumers pin `@stable`, so they only ever receive green syncs and are
+# automatically held at the last working version when a sync fails.
+#
+# Security: only static commands and trusted context values (github.run_id,
+# github.repository, github.server_url) plus this workflow's own step outputs
+# are used. No untrusted github.event.* input is interpolated into run steps.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # push feature/base-url and stable
+  issues: write     # open the failure-report issue
+
+concurrency:
+  group: auto-sync
+  cancel-in-progress: false
+
+env:
+  INTEGRATION_BRANCH: feature/base-url
+  STABLE_BRANCH: stable
+  UPSTREAM_REPO: https://github.com/google/adk-python.git
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout integration branch (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: feature/base-url
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "adk-fork-bot"
+          git config user.email "adk-fork-bot@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream main
+          BEFORE=$(git rev-parse HEAD)
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          if git merge --no-edit upstream/main; then
+            AFTER=$(git rev-parse HEAD)
+            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
+            if [ "$BEFORE" = "$AFTER" ]; then
+              echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+            else
+              echo "result=merged" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            git merge --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.merge.outputs.result == 'merged'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        if: steps.merge.outputs.result == 'merged'
+        run: pip install -e ".[test]"
+
+      - name: Run model tests
+        id: tests
+        if: steps.merge.outputs.result == 'merged'
+        run: python -m pytest tests/unittests/models/ -q
+
+      # --- success path: merge clean + tests green -> advance both branches ---
+      - name: Publish new baseline
+        if: steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success'
+        run: |
+          git push origin HEAD:"$INTEGRATION_BRANCH"
+          git push origin HEAD:"$STABLE_BRANCH"
+          echo "Advanced $STABLE_BRANCH to $(git rev-parse --short HEAD)"
+
+      # --- nothing to do ---
+      - name: Up to date
+        if: steps.merge.outputs.result == 'up-to-date'
+        run: echo "Already in sync with upstream. Nothing to do."
+
+      # --- failure path: conflict or red tests -> hold + report ---
+      - name: Report sync failure
+        if: >-
+          steps.merge.outputs.result == 'conflict' ||
+          (steps.merge.outputs.result == 'merged' && steps.tests.outcome != 'success')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REASON: ${{ steps.merge.outputs.result == 'conflict' && 'merge conflict' || 'test failure' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          STABLE_SHA=$(git rev-parse --short "origin/$STABLE_BRANCH")
+          TITLE="Upstream sync failed ($REASON) — holding stable at $STABLE_SHA"
+          BODY=$(cat <<EOF
+          Automated upstream sync could not complete.
+
+          - **Reason:** $REASON
+          - **\`$STABLE_BRANCH\` is held at:** \`$STABLE_SHA\` (last known-good — consumers are safe)
+          - **Run log:** $RUN_URL
+
+          ### To recover
+          \`\`\`
+          ./scripts/update-fork.sh
+          \`\`\`
+          Resolve the conflict or fix the failing test, push \`$INTEGRATION_BRANCH\`,
+          then fast-forward \`$STABLE_BRANCH\` to it.
+          EOF
+          )
+          EXISTING=$(gh issue list --state open --label auto-sync --json number --jq '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh label create auto-sync --color B60205 --description "Automated upstream sync" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label auto-sync
+          fi
+          exit 1

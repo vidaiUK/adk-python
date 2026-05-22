@@ -16,26 +16,30 @@ upstream.**
 
 ## Installation
 
-Pin a **tag**, never the branch — the `feature/base-url` branch is rebased onto
-upstream and its history is rewritten on every sync.
+Pin the **`stable`** branch. It only ever advances to a commit that has been
+auto-synced with upstream **and** passed the test suite — so it auto-updates on
+green syncs and is automatically held at the last working version when a sync
+fails.
 
 ```bash
-pip install "git+https://github.com/vidaiUK/adk-python.git@fork-v2.0.0"
+pip install "git+https://github.com/vidaiUK/adk-python.git@stable"
 ```
 
 `pyproject.toml`:
 ```toml
 dependencies = [
-    "google-adk @ git+https://github.com/vidaiUK/adk-python.git@fork-v2.0.0",
+    "google-adk @ git+https://github.com/vidaiUK/adk-python.git@stable",
 ]
 ```
 
 `requirements.txt`:
 ```
-git+https://github.com/vidaiUK/adk-python.git@fork-v2.0.0#egg=google-adk
+git+https://github.com/vidaiUK/adk-python.git@stable#egg=google-adk
 ```
 
-The package still imports as `import google.adk` — only the install source changes.
+The package still imports as `import google.adk` — only the install source
+changes. For a frozen, never-moving pin, use a `fork-vX.Y.Z` tag instead of
+`@stable`.
 
 ## What the feature does
 
@@ -73,33 +77,50 @@ from google.adk.agents import Agent
 agent = Agent(model=Gemini(model="gemini-2.5-flash"))
 ```
 
-## Maintaining the fork
+## How the fork is maintained
 
-| Remote     | Points at                          | Role                     |
-|------------|-------------------------------------|--------------------------|
-| `upstream` | `google/adk-python`                 | Read-only. Never commit. |
-| `origin`   | `vidaiUK/adk-python`                | The fork.                |
+### Branches
 
-- `main` — pristine fast-forward-only mirror of `upstream/main`.
-- `feature/base-url` — the single feature commit, rebased onto `upstream/main`.
+| Branch            | Role |
+|-------------------|------|
+| `feature/base-url`| Integration branch — the base_url patch with upstream **merged in**. |
+| `stable`          | What consumers pin. Only ever advances to a green `feature/base-url`. |
 
-### Sync routine
+There is no `upstream` remote in the repo; the automation adds it on the fly.
+The patch is carried by **merging upstream in** (not rebasing) so history is
+never rewritten and `@stable` pins never shift unexpectedly.
 
-Run periodically (weekly, or when a wanted ADK release lands):
+### Automated weekly sync
+
+[`.github/workflows/auto-sync.yml`](.github/workflows/auto-sync.yml) runs every
+Monday (and on demand via *Actions → auto-sync-upstream → Run workflow*):
+
+1. Merge `upstream/main` into `feature/base-url`.
+2. **Merge conflicts** → stop, open an `auto-sync` issue, leave `stable` as-is.
+3. Clean merge → install and run the model test suite.
+4. **Tests pass** → push `feature/base-url` and fast-forward `stable` to it.
+   This is the new baseline; `@stable` consumers pick it up automatically.
+5. **Tests fail** → stop, open an `auto-sync` issue, leave `stable` as-is.
+
+So a sync only ever becomes the consumer-facing baseline if it is green. A
+failed sync holds every consumer at the last working version and surfaces an
+issue (and a red badge in the README) describing what needs manual review.
+
+### Recovering from a failed sync
+
+When the `auto-sync` issue appears:
 
 ```bash
-./scripts/update-fork.sh   # ff main, rebase feature/base-url, run model tests
-git push --force-with-lease origin feature/base-url
-git tag -a fork-vX.Y.Z -m "ADK vX.Y.Z + base_url env vars"
-git push origin fork-vX.Y.Z
+./scripts/update-fork.sh        # merges upstream, runs tests locally
+# resolve the conflict / fix the failing test, then:
+git push origin feature/base-url
+git push origin feature/base-url:stable   # fast-forward stable once green
 ```
 
-Tag names mirror the upstream version the fork is based on.
+Optionally snapshot a release: `git tag -a fork-vX.Y.Z -m "..." && git push origin fork-vX.Y.Z`.
 
 ### CI
 
-[`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) runs the model
-test suite on every push to `feature/base-url` and weekly via cron. **A red
-weekly build means upstream drifted — time to rebase.** Rebasing is intentionally
-manual: a rebase can raise merge conflicts that need a human decision, and
-passing tests do not by themselves prove a rebase preserved the feature.
+[`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) additionally
+runs the model tests on every push to `feature/base-url`, so manual pushes are
+checked too.
