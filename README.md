@@ -13,6 +13,9 @@
 > [`google/adk-python`](https://github.com/google/adk-python) daily at 06:00 UTC**.
 > Each sync merges the latest upstream changes and runs the test suite; a sync
 > only becomes the `stable` baseline if it passes.
+> <!-- SYNC-TIMES-START -->
+> <!-- (populated automatically by the auto-sync workflow after its first run) -->
+> <!-- SYNC-TIMES-END -->
 >
 > **Sync status:** the `upstream sync` badge above is green when the most
 > recent sync succeeded. If it is red, the `stable` branch is **held at the
