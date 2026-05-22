@@ -4,13 +4,13 @@
 # Mirrors what .github/workflows/auto-sync.yml does, for local recovery when
 # an automated sync fails (merge conflict or red tests).
 #
-#   feature/base-url = integration branch (base_url patch + upstream merged in)
+#   main = integration branch (base_url patch + upstream merged in)
 #   stable           = what consumers pin; advance it only when tests pass
 #
 # Usage: ./scripts/update-fork.sh
 set -euo pipefail
 
-INTEGRATION_BRANCH="feature/base-url"
+INTEGRATION_BRANCH="main"
 
 # Ensure an `upstream` remote exists.
 if ! git remote get-url upstream >/dev/null 2>&1; then

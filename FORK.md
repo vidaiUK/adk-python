@@ -83,8 +83,8 @@ agent = Agent(model=Gemini(model="gemini-2.5-flash"))
 
 | Branch            | Role |
 |-------------------|------|
-| `feature/base-url`| Integration branch — the base_url patch with upstream **merged in**. |
-| `stable`          | What consumers pin. Only ever advances to a green `feature/base-url`. |
+| `main`| Integration branch — the base_url patch with upstream **merged in**. |
+| `stable`          | What consumers pin. Only ever advances to a green `main`. |
 
 There is no `upstream` remote in the repo; the automation adds it on the fly.
 The patch is carried by **merging upstream in** (not rebasing) so history is
@@ -95,10 +95,10 @@ never rewritten and `@stable` pins never shift unexpectedly.
 [`.github/workflows/auto-sync.yml`](.github/workflows/auto-sync.yml) runs every
 Monday (and on demand via *Actions → auto-sync-upstream → Run workflow*):
 
-1. Merge `upstream/main` into `feature/base-url`.
+1. Merge `upstream/main` into `main`.
 2. **Merge conflicts** → stop, open an `auto-sync` issue, leave `stable` as-is.
 3. Clean merge → install and run the model test suite.
-4. **Tests pass** → push `feature/base-url` and fast-forward `stable` to it.
+4. **Tests pass** → push `main` and fast-forward `stable` to it.
    This is the new baseline; `@stable` consumers pick it up automatically.
 5. **Tests fail** → stop, open an `auto-sync` issue, leave `stable` as-is.
 
@@ -113,8 +113,8 @@ When the `auto-sync` issue appears:
 ```bash
 ./scripts/update-fork.sh        # merges upstream, runs tests locally
 # resolve the conflict / fix the failing test, then:
-git push origin feature/base-url
-git push origin feature/base-url:stable   # fast-forward stable once green
+git push origin main
+git push origin main:stable   # fast-forward stable once green
 ```
 
 Optionally snapshot a release: `git tag -a fork-vX.Y.Z -m "..." && git push origin fork-vX.Y.Z`.
@@ -122,5 +122,5 @@ Optionally snapshot a release: `git tag -a fork-vX.Y.Z -m "..." && git push orig
 ### CI
 
 [`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) additionally
-runs the model tests on every push to `feature/base-url`, so manual pushes are
+runs the model tests on every push to `main`, so manual pushes are
 checked too.

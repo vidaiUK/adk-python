@@ -3,7 +3,7 @@ name: auto-sync-upstream
 # Automatically syncs the fork with upstream google/adk-python.
 #
 # Flow:
-#   1. Merge upstream/main into feature/base-url (the integration branch).
+#   1. Merge upstream into main (the integration branch).
 #   2. If the merge conflicts -> stop, open an issue, leave `stable` untouched.
 #   3. If clean -> install + run the model tests.
 #   4. Tests pass -> fast-forward `stable` to the new commit (the new baseline).
@@ -22,7 +22,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # push feature/base-url and stable
+  contents: write   # push main and stable
   issues: write     # open the failure-report issue
 
 concurrency:
@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  INTEGRATION_BRANCH: feature/base-url
+  INTEGRATION_BRANCH: main
   STABLE_BRANCH: stable
   UPSTREAM_REPO: https://github.com/google/adk-python.git
 
@@ -41,7 +41,7 @@ jobs:
       - name: Checkout integration branch (full history)
         uses: actions/checkout@v4
         with:
-          ref: feature/base-url
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

@@ -7,9 +7,9 @@ name: fork-ci
 
 on:
   push:
-    branches: [feature/base-url]
+    branches: [main]
   pull_request:
-    branches: [feature/base-url]
+    branches: [main]
   schedule:
     - cron: '0 6 * * 1'  # Mondays 06:00 UTC
   workflow_dispatch: {}
