@@ -14,7 +14,8 @@
 > Each sync merges the latest upstream changes and runs the test suite; a sync
 > only becomes the `stable` baseline if it passes.
 > <!-- SYNC-TIMES-START -->
-> <!-- (populated automatically by the auto-sync workflow after its first run) -->
+> _Last sync attempt: 2026-05-22 08:40 UTC (✅ last sync succeeded)._
+> _Next scheduled sync: 2026-05-23 06:00 UTC._
 > <!-- SYNC-TIMES-END -->
 >
 > **Sync status:** the `upstream sync` badge above is green when the most
