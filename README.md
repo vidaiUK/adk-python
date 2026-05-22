@@ -9,9 +9,14 @@
 > This was [declined upstream](https://github.com/google/adk-python/issues/5383);
 > the fork is its permanent home. **Open issues/PRs here, not upstream.**
 >
-> **Sync status:** the `upstream sync` badge above is green when the fork is
-> auto-synced and tested against latest ADK. If it is red, the `stable` branch
-> is **held at the last passing version** — see the open
+> **Sync cadence:** this fork is **auto-synced with upstream
+> [`google/adk-python`](https://github.com/google/adk-python) daily at 06:00 UTC**.
+> Each sync merges the latest upstream changes and runs the test suite; a sync
+> only becomes the `stable` baseline if it passes.
+>
+> **Sync status:** the `upstream sync` badge above is green when the most
+> recent sync succeeded. If it is red, the `stable` branch is **held at the
+> last passing version** — see the open
 > [`auto-sync`](https://github.com/vidaiUK/adk-python/issues?q=is%3Aissue+is%3Aopen+label%3Aauto-sync)
 > issue for what needs manual review.
 >
