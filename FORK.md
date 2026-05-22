@@ -5,14 +5,38 @@ It is **stock ADK plus one feature**: environment-variable configuration of the
 LLM `base_url`, so endpoints can be redirected (e.g. through a local or
 multi-provider proxy) without touching code.
 
-## Why a fork?
+## Why this fork exists
 
 The feature was proposed upstream in
 [google/adk-python#5383](https://github.com/google/adk-python/issues/5383) and
-**declined** — the maintainers prefer to keep the framework minimal and consider
-passing `base_url` to the model constructor sufficient. This fork is therefore
-the permanent home for the change. **File issues and PRs against this repo, not
-upstream.**
+**declined**. The maintainers' reasoning: ADK already lets you pass `base_url`
+to a model constructor, and they prefer to keep the framework unopinionated
+rather than add an environment variable for every configuration option.
+
+That is a reasonable position — for a framework whose primary audience runs
+Google's own models. We don't dispute it. But it has a cost, and the cost lands
+on the developer:
+
+- **Without env-var support, endpoint configuration lives in code.** Every
+  consumer, for every vendor, has to thread `base_url` into model construction
+  by hand. There is no single switch.
+- **It is per-vendor.** Redirecting Gemini, Anthropic and an OpenAI-compatible
+  provider means three separate pieces of wiring, repeated in every project.
+
+This fork takes the other tradeoff. **One variable — `ADK_LLM_BASE_URL` —
+configures every provider at once.** Point an entire agent stack at a proxy,
+a gateway, or a local endpoint by setting a single environment variable, with
+no code changes and no per-vendor boilerplate. Each vendor still has its own
+override for the cases that need it (see the table below) — but the *default*
+is vendor-independent.
+
+In short: upstream ADK optimizes for Google's models, which is understandable.
+This fork optimizes for the multi-vendor developer who wants infrastructure
+configuration to live in the environment, not the code. Different priorities,
+both legitimate — which is exactly why this is a fork and not an argument.
+
+**File fork-specific issues and PRs here; send general ADK changes upstream.**
+See [CONTRIBUTING.md](CONTRIBUTING.md) for routing.
 
 ## Installation
 
@@ -90,10 +114,11 @@ There is no `upstream` remote in the repo; the automation adds it on the fly.
 The patch is carried by **merging upstream in** (not rebasing) so history is
 never rewritten and `@stable` pins never shift unexpectedly.
 
-### Automated weekly sync
+### Automated daily sync
 
-[`.github/workflows/auto-sync.yml`](.github/workflows/auto-sync.yml) runs every
-Monday (and on demand via *Actions → auto-sync-upstream → Run workflow*):
+[`.github/workflows/auto-sync.yml`](.github/workflows/auto-sync.yml) runs daily
+at 06:00 UTC (and on demand via *Actions → auto-sync-upstream → Run workflow*).
+Daily keeps each merge small, so conflicts stay rare and trivial:
 
 1. Merge `upstream/main` into `main`.
 2. **Merge conflicts** → stop, open an `auto-sync` issue, leave `stable` as-is.

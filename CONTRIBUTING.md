@@ -1,3 +1,30 @@
+<!-- FORK-CONTRIB-START -->
+> ## 📍 Contributing — read this first
+>
+> This is **`vidaiUK/adk-python`**, a fork of
+> [`google/adk-python`](https://github.com/google/adk-python). Where your change
+> belongs depends on what it is:
+>
+> | Your change is… | Send it to | What to do |
+> |---|---|---|
+> | A fix or feature for **ADK itself** | **Upstream** — `google/adk-python` | Follow the Google process below (CLA required). Do **not** PR it here. |
+> | Specific to **this fork's feature** (env-var `base_url` resolution — see [FORK.md](FORK.md)) | **Here** — `vidaiUK/adk-python` | Open an issue/PR against the `main` branch. No CLA. |
+> | You're not sure | **Here**, as an issue | Open an issue and we'll route it. |
+>
+> **Why two destinations:** this fork deliberately carries *only* the `base_url`
+> env-var change. Everything else is stock ADK and flows in automatically from
+> upstream via the daily sync ([FORK.md](FORK.md)) — so general ADK improvements
+> are far more valuable upstream, where everyone gets them.
+>
+> **Working on the fork feature:**
+> 1. Branch from `main`. 2. Keep the change scoped to `base_url` resolution.
+> 3. Add/update tests under `tests/unittests/models/`. 4. Open a PR to `main`;
+>    `fork-ci` must be green. 5. Once merged and green, the daily sync promotes
+>    it to the `stable` branch that consumers pin.
+>
+> The Google process below applies only to **upstream-bound** contributions.
+<!-- FORK-CONTRIB-END -->
+
 # How to contribute
 
 We'd love to accept your patches and contributions to this project.
