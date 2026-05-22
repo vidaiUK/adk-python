@@ -1,37 +1,48 @@
 <!-- FORK-NOTICE-START -->
-> ## ⚡ This is a Fork — and here's why
->
-> [![upstream sync](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml)
-> [![fork ci](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml)
->
-> **`vidaiUK/adk-python`** is stock Google ADK plus **one change**: a single
-> environment variable, `ADK_LLM_BASE_URL`, that redirects the endpoint for
-> *every* LLM provider at once — Gemini, Anthropic, and OpenAI-compatible alike.
->
-> Upstream ADK lets you set `base_url` per model **in code**, and the
-> maintainers [declined](https://github.com/google/adk-python/issues/5383) to
-> add env-var support — a reasonable call for a framework whose audience mostly
-> runs Google's own models. But it leaves multi-vendor developers wiring
-> `base_url` by hand, per provider, in every project. This fork takes the other
-> tradeoff: **point your whole agent stack at a proxy or gateway by setting one
-> environment variable — no code, no per-vendor boilerplate, vendor-independent
-> by default.** → **[Read the full rationale in FORK.md](FORK.md#why-this-fork-exists)**
->
-> **Open fork-specific issues/PRs here; send general ADK changes upstream.**
->
-> **Sync cadence:** daily 06:00 UTC. See [FORK.md](FORK.md#how-the-fork-is-maintained) for how syncs are handled.
->
-> **Install:**
-> ```
-> pip install "git+https://github.com/vidaiUK/adk-python.git@stable"
-> ```
-> The `stable` branch only ever advances to a commit that passed tests against
-> the latest upstream — so `@stable` auto-updates on green syncs and is held
-> back on red ones.
->
-> **Env vars:** `ADK_LLM_BASE_URL` works for every provider; each provider
-> also honors its own (`ADK_GEMINI_BASE_URL`, `ANTHROPIC_BASE_URL`,
-> `OPENAI_API_BASE`, …). See **[FORK.md](FORK.md)** for the full table.
+# ⚡ vidaiUK/adk-python — a fork of Google ADK
+
+[![upstream sync](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/auto-sync.yml)
+[![fork ci](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml/badge.svg)](https://github.com/vidaiUK/adk-python/actions/workflows/fork-ci.yml)
+
+This is stock Google ADK plus **one change**: a single environment variable,
+`ADK_LLM_BASE_URL`, that redirects the endpoint for *every* LLM provider at
+once — Gemini, Anthropic, and OpenAI-compatible alike.
+
+**Sync cadence:** auto-synced with upstream daily at 06:00 UTC — see
+[FORK.md](FORK.md#how-the-fork-is-maintained) for how syncs are handled.
+
+### Install
+
+```bash
+pip install "git+https://github.com/vidaiUK/adk-python.git@stable"
+```
+
+The `stable` branch only ever advances to a commit that passed tests against
+the latest upstream, so `@stable` auto-updates on green syncs and holds at the
+last working version otherwise.
+
+### Why this fork exists
+
+Upstream ADK lets you set `base_url` per model in code, and the maintainers
+[declined](https://github.com/google/adk-python/issues/5383) to add env-var
+support — a reasonable call for a framework whose audience mostly runs Google's
+own models. But it leaves multi-vendor developers wiring `base_url` by hand,
+per provider, in every project.
+
+This fork takes the other tradeoff: point an entire agent stack at a proxy or
+gateway by setting one environment variable — no code changes, no per-vendor
+boilerplate, vendor-independent by default. Each provider keeps its own
+override for cases that need it.
+
+→ Full rationale and the env-var reference: **[FORK.md](FORK.md)**.
+
+### Contributing
+
+Open **fork-specific** issues and PRs here. Send **general ADK** changes
+upstream to [`google/adk-python`](https://github.com/google/adk-python).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for routing.
+
+---
 <!-- FORK-NOTICE-END -->
 
 # Agent Development Kit (ADK) 2.0
