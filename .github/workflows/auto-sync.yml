@@ -98,56 +98,6 @@ jobs:
         if: steps.merge.outputs.result == 'up-to-date'
         run: echo "Already in sync with upstream. Nothing to do."
 
-      # --- always: refresh the "last synced / next sync" block in the README ---
-      # Runs on every path. Edits a fresh checkout of origin/main so it never
-      # carries merge residue from a failed run. Skips the commit if unchanged.
-      - name: Update sync timestamps in README
-        if: always()
-        run: |
-          if [ "${{ steps.merge.outputs.result }}" = "conflict" ] || \
-             [ "${{ steps.tests.outcome }}" = "failure" ]; then
-            OUTCOME="⚠️ last attempt failed — see the open auto-sync issue"
-          else
-            OUTCOME="✅ last sync succeeded"
-          fi
-          NOW=$(date -u '+%Y-%m-%d %H:%M UTC')
-          NEXT=$(date -u -d 'tomorrow 06:00' '+%Y-%m-%d %H:%M UTC')
-
-          TMP=$(mktemp -d)
-          git clone --depth 1 --branch main \
-            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$TMP"
-          cd "$TMP"
-
-          python3 - "$NOW" "$NEXT" "$OUTCOME" <<'PY'
-          import sys, re, pathlib
-          now, nxt, outcome = sys.argv[1], sys.argv[2], sys.argv[3]
-          block = (
-              "> <!-- SYNC-TIMES-START -->\n"
-              f"> _Last sync attempt: {now} ({outcome})._\n"
-              f"> _Next scheduled sync: {nxt}._\n"
-              "> <!-- SYNC-TIMES-END -->"
-          )
-          p = pathlib.Path("README.md")
-          text = p.read_text()
-          new = re.sub(
-              r"> <!-- SYNC-TIMES-START -->.*?> <!-- SYNC-TIMES-END -->",
-              block.replace("\\", "\\\\"), text, flags=re.S,
-          )
-          if new != text:
-              p.write_text(new)
-              print("README updated")
-          else:
-              print("README unchanged")
-          PY
-
-          if ! git diff --quiet README.md; then
-            git config user.name  "adk-fork-bot"
-            git config user.email "adk-fork-bot@users.noreply.github.com"
-            git add README.md
-            git commit -m "chore: update sync timestamps [skip ci]"
-            git push origin main
-          fi
-
       # --- failure path: conflict or red tests -> hold + report ---
       - name: Report sync failure
         if: >-
