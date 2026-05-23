@@ -22,7 +22,22 @@ git fetch upstream main --prune
 
 echo ">> Merging upstream/main into ${INTEGRATION_BRANCH}..."
 git checkout "${INTEGRATION_BRANCH}"
+BEFORE=$(git rev-parse HEAD)
 git merge --no-edit upstream/main   # stops here if there are conflicts
+
+# Revert any upstream changes to .github/workflows/** so disabled workflows
+# stay disabled and the fork's CI surface stays stable. (The auto-sync
+# GitHub workflow does the same — for the same reason GITHUB_TOKEN cannot
+# push these files, mirroring its behaviour here keeps local and automated
+# syncs equivalent.) Skip when nothing was merged.
+if [ "$BEFORE" != "$(git rev-parse HEAD)" ] && \
+   ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
+  echo ">> Reverting upstream changes under .github/workflows/ (keep fork CI stable)"
+  git checkout "$BEFORE" -- .github/workflows/
+  if ! git diff --quiet --cached; then
+    git commit --amend --no-edit
+  fi
+fi
 
 echo ">> Running model tests..."
 python -m pytest tests/unittests/models/ -q
