@@ -22,8 +22,10 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # push main and stable
-  issues: write     # open the failure-report issue
+  contents: write    # push main and stable
+  issues: write      # open the failure-report issue
+  actions: write     # required when upstream merges modify workflow files
+  workflows: write   # GitHub gates .github/workflows/** pushes behind this
 
 concurrency:
   group: auto-sync
@@ -98,14 +100,18 @@ jobs:
         if: steps.merge.outputs.result == 'up-to-date'
         run: echo "Already in sync with upstream. Nothing to do."
 
-      # --- failure path: conflict or red tests -> hold + report ---
+      # --- failure path: any failure (conflict, red tests, push rejection) -> hold + report ---
       - name: Report sync failure
         if: >-
+          failure() ||
           steps.merge.outputs.result == 'conflict' ||
           (steps.merge.outputs.result == 'merged' && steps.tests.outcome != 'success')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REASON: ${{ steps.merge.outputs.result == 'conflict' && 'merge conflict' || 'test failure' }}
+          REASON: >-
+            ${{ steps.merge.outputs.result == 'conflict' && 'merge conflict' ||
+                (steps.merge.outputs.result == 'merged' && steps.tests.outcome != 'success') && 'test failure' ||
+                'publish failed (see run log)' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           STABLE_SHA=$(git rev-parse --short "origin/$STABLE_BRANCH")
