@@ -24,8 +24,7 @@ on:
 permissions:
   contents: write    # push main and stable
   issues: write      # open the failure-report issue
-  actions: write     # required when upstream merges modify workflow files
-  workflows: write   # GitHub gates .github/workflows/** pushes behind this
+  actions: write     # required when upstream merges modify .github/workflows/**
 
 concurrency:
   group: auto-sync
@@ -61,10 +60,23 @@ jobs:
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
           if git merge --no-edit upstream/main; then
             AFTER=$(git rev-parse HEAD)
-            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
             if [ "$BEFORE" = "$AFTER" ]; then
+              echo "after=$AFTER" >> "$GITHUB_OUTPUT"
               echo "result=up-to-date" >> "$GITHUB_OUTPUT"
             else
+              # GITHUB_TOKEN cannot push .github/workflows/** changes (GitHub
+              # gates that behind the `workflow` OAuth scope, which only PATs
+              # carry). Revert any workflow-file changes the merge introduced
+              # so the push always succeeds; we accept slow drift on those
+              # files (most upstream workflows are disabled in this fork anyway).
+              if ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
+                echo "Reverting upstream changes to .github/workflows/ (cannot push them)"
+                git checkout "$BEFORE" -- .github/workflows/
+                if ! git diff --quiet --cached; then
+                  git commit --amend --no-edit
+                fi
+              fi
+              echo "after=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
               echo "result=merged" >> "$GITHUB_OUTPUT"
             fi
           else

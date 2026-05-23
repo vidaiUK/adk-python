@@ -131,6 +131,16 @@ So a sync only ever becomes the consumer-facing baseline if it is green. A
 failed sync holds every consumer at the last working version and surfaces an
 issue (and a red badge in the README) describing what needs manual review.
 
+**One caveat:** GitHub's built-in `GITHUB_TOKEN` cannot push changes to
+`.github/workflows/**` (that capability requires the `workflow` OAuth scope,
+which only Personal Access Tokens carry). When an upstream merge modifies a
+workflow file, the auto-sync step **reverts that file to the local version**
+and proceeds with the rest of the merge. This fork therefore drifts slowly
+from upstream on workflow files — acceptable here because most inherited
+upstream workflows are already disabled. If you ever need an upstream workflow
+change, sync it manually with `./scripts/update-fork.sh` (which uses your
+personal credentials).
+
 ### Recovering from a failed sync
 
 When the `auto-sync` issue appears:
