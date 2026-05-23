@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.1.0](https://github.com/google/adk-python/compare/v2.0.0...v2.1.0) (2026-05-23)
+
+
+### Features
+
+* Add chart generation and artifact loading to data agent ([db06416](https://github.com/google/adk-python/commit/db064160bf634b1c7e644012076f077cde6cfcef))
+* Add support for creating sandboxes from templates and snapshots ([cbd14eb](https://github.com/google/adk-python/commit/cbd14ebf99bbff22ed28273f095f1fc05793bed2))
+* Add user.id to gen_ai.user.message log records for telemetry ([eb379be](https://github.com/google/adk-python/commit/eb379bea5b87579d5a649698c3fdd7473ac5e5a2))
+* Fix error message telemetry for tool calls ([e56c021](https://github.com/google/adk-python/commit/e56c021ef73193b24023494d853ac4fdab9115bb))
+* Preserve transcription event order in conversation trajectory ([b3d0759](https://github.com/google/adk-python/commit/b3d0759e42d0def400160e4196a874171579a101))
+
+
+### Bug Fixes
+
+* **ci:** Add python-dateutil dependency to stale-bot workflow ([84fa984](https://github.com/google/adk-python/commit/84fa984ae087c10b59355f915077d1119969c3f2))
+* **ci:** Prevent workflow failures in relocated adk_team samples ([55cbc8c](https://github.com/google/adk-python/commit/55cbc8c9e8b649c48a79c26fb112dbc005386338))
+* **ci:** Use absolute path for PYTHONPATH in upload docs workflow ([85223e6](https://github.com/google/adk-python/commit/85223e629e160cad7dd9877483e04faacc151bc2))
+* **cli:** Fix --reload_agents for web ([1307f8e](https://github.com/google/adk-python/commit/1307f8eeba4252f43dad057438ba68686e3b7e41))
+* **cli:** Inform user to install optional dependency on missing google.cloud ([57d677c](https://github.com/google/adk-python/commit/57d677c5cde6a87a24574042013c0c5382a0a2d3))
+* convert Union[Pydantic, Pydantic] tool args at runtime ([104edc8](https://github.com/google/adk-python/commit/104edc83170a5871075285b336d19ac9515c1a90)), closes [#5799](https://github.com/google/adk-python/issues/5799)
+* Fix bug where grounding metadata in Gemini 3.1 live was being silently discarded ([b9751eb](https://github.com/google/adk-python/commit/b9751eb9df7868223551b4ce33f2ff360f7d3f3e))
+* fix input and output transcription finished events for Gemini v3.1 ([d17a2a3](https://github.com/google/adk-python/commit/d17a2a322156c4d4c617e8d4cbac14f24652e617))
+* lazy-import GCS evaluation managers in evals utility ([5f91a9d](https://github.com/google/adk-python/commit/5f91a9db032bb9ffd0b59ba24aad04b680481c98))
+* Make google-cloud-storage import lazy in skill utils ([416775d](https://github.com/google/adk-python/commit/416775dcceae8f57badf0cd55c44148f6426b6db))
+* resolve circular import caused by llm_request ([7e38fc8](https://github.com/google/adk-python/commit/7e38fc811ed58235aa5c120c48c419e0f10a8de2))
+* Resolve circular import in base_tool ([92cf192](https://github.com/google/adk-python/commit/92cf19255e21a6edc08a5cf09a1cfbe936b5690e))
+* **tests:** Append trailing newline to JSON test outputs ([3329ced](https://github.com/google/adk-python/commit/3329ced0b9ddb2e681a849d62416f14f837e40dd))
+* **tools:** Prevent session drop on MCP tool error ([933653c](https://github.com/google/adk-python/commit/933653c61c5498fa0febe1a984d92b82a899e446))
+* update EditFileTool to handle cross-platform line breaks and escape regex characters ([1f24553](https://github.com/google/adk-python/commit/1f245535ff1107b428f4fb0837db985457ddf024))
+
+
 ## [2.0.0](https://github.com/google/adk-python/compare/v2.0.0b1...v2.0.0) (2026-05-19)
 
 ### ADK 2.0 General Availability
