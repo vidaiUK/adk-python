@@ -63,7 +63,6 @@ Search for any existing pull requests that attempt to resolve the issue:
   ```
 - **Analyze progress**: Check if the PR is open, merged, or closed, and if it successfully fixes the issue according to the repository's testing patterns.
 - **Present the structured report**: Format and present your findings structured as a premium report following the **Report Template** below.
-- **Offer to create a fix**: If no existing PR is found, you MUST explicitly ask the user: "Would you like me to create and implement a fix for this issue in the workspace? (Note: The changes and tests will be created in a new branch but NOT committed, so you can review and iterate on them.)"
 
 ---
 
