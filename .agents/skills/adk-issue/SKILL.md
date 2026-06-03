@@ -1,6 +1,6 @@
 ---
 name: adk-issue
-description: Orchestrate analyzing and triaging GitHub issues for the adk-python repository. Use this skill when a user provides a GitHub issue number or link. It coordinates triage analysis via `adk-issue-analyze` and implementation via `adk-issue-fix`. Triggers on "analyze issue", "issue #", "github issue", "github.com/google/adk-python/issues/".
+description: Orchestrate analyzing, triaging, and resolving GitHub issues for the adk-python repository. Use this skill when a user provides a GitHub issue number or link to perform both analysis and implementation. It coordinates triage analysis via `adk-issue-analyze` and implementation via `adk-issue-fix`. Triggers on "analyze issue", "issue #", "github issue", "github.com/google/adk-python/issues/". Do NOT trigger or use this skill when the prompt explicitly requests the "/adk-issue-analyze" command (use the read-only "adk-issue-analyze" skill instead).
 ---
 
 # ADK Issue Resolution Orchestrator
