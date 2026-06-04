@@ -103,8 +103,15 @@ jobs:
             # Append the closes tag using Python to avoid relying on LLM formatting
             python -c "import os, subprocess; msg = subprocess.check_output(['git', 'log', '-1', '--pretty=%B'], text=True); tag = 'closes https://github.com/google/adk-python/issues/' + os.environ['ISSUE_NUMBER']; subprocess.run(['git', 'commit', '--amend', '-m', msg.strip() + '\n\n' + tag], check=True) if tag not in msg else None"
 
+            # Retrieve the username of the authenticated user
+            BOT_USER=$(gh api user --jq .login)
+            echo "Authenticated bot user is $BOT_USER"
+
+            # Ensure the fork exists
+            gh repo fork google/adk-python --clone=false --remote=false || true
+
             # Push the branch to the bot fork
-            git remote add fork https://x-access-token:${{ secrets.ADK_TRIAGE_AGENT }}@github.com/adk-bot/adk-python.git
+            git remote add fork "https://x-access-token:${{ secrets.ADK_TRIAGE_AGENT }}@github.com/${BOT_USER}/adk-python.git"
             git push fork "$BRANCH_NAME" --force
 
             # Retrieve the commit message of the last commit
@@ -115,7 +122,7 @@ jobs:
               --repo google/adk-python \
               --title "fix(issue): fix issue #${ISSUE_NUMBER}" \
               --body "$COMMIT_MSG" \
-              --head "adk-bot:$BRANCH_NAME" \
+              --head "${BOT_USER}:$BRANCH_NAME" \
               --base "main"
           else
             echo "No changes made by the agent. Skipping PR creation."
