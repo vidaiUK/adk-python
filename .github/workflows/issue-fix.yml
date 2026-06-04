@@ -108,7 +108,7 @@ jobs:
             echo "Authenticated bot user is $BOT_USER"
 
             # Ensure the fork exists
-            gh repo fork google/adk-python --clone=false --remote=false || true
+            gh repo fork google/adk-python --clone=false || true
 
             # Push the branch to the bot fork
             git remote add fork "https://x-access-token:${{ secrets.ADK_TRIAGE_AGENT }}@github.com/${BOT_USER}/adk-python.git"
