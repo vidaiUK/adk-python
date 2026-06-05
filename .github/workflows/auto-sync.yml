@@ -66,12 +66,20 @@ jobs:
             else
               # GITHUB_TOKEN cannot push .github/workflows/** changes (GitHub
               # gates that behind the `workflow` OAuth scope, which only PATs
-              # carry). Revert any workflow-file changes the merge introduced
-              # so the push always succeeds; we accept slow drift on those
-              # files (most upstream workflows are disabled in this fork anyway).
+              # carry). Restore the entire workflows/ directory to its
+              # pre-merge state so the push always succeeds. We must handle
+              # both kinds of upstream change:
+              #   * modifications  -> reset to pre-merge content
+              #   * NEW files       -> `git checkout BEFORE -- path` does NOT
+              #                        remove them; we have to delete them
+              # `git rm -rf` then `git checkout BEFORE --` is the bulletproof
+              # combination: it wipes the directory then restores only what
+              # existed before the merge. Slow drift on workflow files is the
+              # accepted trade-off (most are disabled in this fork anyway).
               if ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
-                echo "Reverting upstream changes to .github/workflows/ (cannot push them)"
-                git checkout "$BEFORE" -- .github/workflows/
+                echo "Restoring .github/workflows/ to pre-merge state (cannot push workflow changes)"
+                git rm -rf --quiet --ignore-unmatch .github/workflows/
+                git checkout "$BEFORE" -- .github/workflows/ 2>/dev/null || true
                 if ! git diff --quiet --cached; then
                   git commit --amend --no-edit
                 fi
@@ -143,11 +151,17 @@ jobs:
           then fast-forward \`$STABLE_BRANCH\` to it.
           EOF
           )
+          # Ensure the label exists BEFORE any gh call that filters on it.
+          # `gh label create` errors if the label already exists; swallow only
+          # that specific case (don't blanket-suppress with 2>/dev/null, which
+          # hid a permission failure on an earlier run).
+          if ! gh label list --search auto-sync --json name --jq '.[].name' | grep -qx auto-sync; then
+            gh label create auto-sync --color B60205 --description "Automated upstream sync"
+          fi
           EXISTING=$(gh issue list --state open --label auto-sync --json number --jq '.[0].number')
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
           else
-            gh label create auto-sync --color B60205 --description "Automated upstream sync" 2>/dev/null || true
             gh issue create --title "$TITLE" --body "$BODY" --label auto-sync
           fi
           exit 1

@@ -25,15 +25,18 @@ git checkout "${INTEGRATION_BRANCH}"
 BEFORE=$(git rev-parse HEAD)
 git merge --no-edit upstream/main   # stops here if there are conflicts
 
-# Revert any upstream changes to .github/workflows/** so disabled workflows
+# Restore .github/workflows/ to its pre-merge state so disabled workflows
 # stay disabled and the fork's CI surface stays stable. (The auto-sync
-# GitHub workflow does the same — for the same reason GITHUB_TOKEN cannot
-# push these files, mirroring its behaviour here keeps local and automated
-# syncs equivalent.) Skip when nothing was merged.
+# GitHub workflow does the same; mirroring it here keeps local and
+# automated syncs equivalent.) Must handle both kinds of upstream change:
+#   * modifications -> reset to pre-merge content
+#   * NEW files     -> git checkout BEFORE -- path does NOT delete them
+# `git rm -rf` then `git checkout BEFORE --` is the bulletproof combination.
 if [ "$BEFORE" != "$(git rev-parse HEAD)" ] && \
    ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
-  echo ">> Reverting upstream changes under .github/workflows/ (keep fork CI stable)"
-  git checkout "$BEFORE" -- .github/workflows/
+  echo ">> Restoring .github/workflows/ to pre-merge state (keep fork CI stable)"
+  git rm -rf --quiet --ignore-unmatch .github/workflows/
+  git checkout "$BEFORE" -- .github/workflows/ 2>/dev/null || true
   if ! git diff --quiet --cached; then
     git commit --amend --no-edit
   fi
