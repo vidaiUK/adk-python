@@ -580,6 +580,9 @@ class BaseLlmFlow(ABC):
             invocation_context.agent.name,
         )
         async with llm.connect(llm_request) as llm_connection:
+          # Reset retry count to allow the maximum reconnect attempts for
+          # subsequent connection drops.
+          attempt = 1
           # Skip sending history if we are resuming a session. The server
           # already has the state associated with the resumption handle.
           if (
@@ -609,8 +612,6 @@ class BaseLlmFlow(ABC):
                 )
             ) as agen:
               async for event in agen:
-                # Reset attempt counter on successful communication.
-                attempt = 1
                 # Empty event means the queue is closed.
                 if not event:
                   break
