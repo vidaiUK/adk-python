@@ -385,7 +385,7 @@ async def _run_and_handle_error(
     ) as tel_ctx:
       async with Aclosing(response_generator) as agen:
         async for llm_response in agen:
-          tel_ctx.record_llm_response(llm_response)
+          tel_ctx.record_llm_response(invocation_context, llm_response)
           yield llm_response
   except Exception as model_error:
     callback_context = CallbackContext(
@@ -434,8 +434,8 @@ async def _process_agent_tools(
   names to ``BaseTool`` instances ready for function call dispatch.
 
   Args:
-    invocation_context: The invocation context (``agent`` is read
-      from ``invocation_context.agent``).
+    invocation_context: The invocation context (``agent`` is read from
+      ``invocation_context.agent``).
     llm_request: The LLM request to populate with tool declarations.
   """
   agent = invocation_context.agent
