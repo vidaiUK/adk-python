@@ -116,6 +116,11 @@ class Gemini(BaseLlm):
 
   model: str = 'gemini-2.5-flash'
 
+  client_kwargs: Optional[dict[str, Any]] = Field(
+      default=None, exclude=True, repr=False
+  )
+  """Extra arguments to pass to the google.genai.Client constructor."""
+
   base_url: Optional[str] = Field(
       default_factory=lambda: (
           os.environ.get('ADK_GEMINI_BASE_URL')
@@ -361,6 +366,9 @@ class Gemini(BaseLlm):
     if self.model.startswith('projects/'):
       kwargs['enterprise'] = True
 
+    if self.client_kwargs:
+      kwargs.update(self.client_kwargs)
+
     return Client(**kwargs)
 
   @cached_property
@@ -405,6 +413,9 @@ class Gemini(BaseLlm):
     }
     if self.model.startswith('projects/'):
       kwargs['enterprise'] = True
+
+    if self.client_kwargs:
+      kwargs.update(self.client_kwargs)
 
     return Client(**kwargs)
 
@@ -467,6 +478,10 @@ class Gemini(BaseLlm):
             ' backend. Please use Vertex AI backend.'
         )
     llm_request.live_connect_config.tools = llm_request.config.tools
+    if llm_request.config.thinking_config is not None:
+      llm_request.live_connect_config.thinking_config = (
+          llm_request.config.thinking_config
+      )
     logger.debug('Connecting to live with llm_request:%s', llm_request)
     logger.debug('Live connect config: %s', llm_request.live_connect_config)
     async with self._live_api_client.aio.live.connect(
