@@ -128,6 +128,11 @@ jobs:
           (steps.merge.outputs.result == 'merged' && steps.tests.outcome != 'success')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pin every gh call to THIS repo. We added `upstream` as a git remote
+          # earlier in the job; the gh CLI infers its default repo from git
+          # remotes and may pick the wrong one (a recent run targeted
+          # google/adk-python's labels API and got a 403).
+          REPO: ${{ github.repository }}
           REASON: >-
             ${{ steps.merge.outputs.result == 'conflict' && 'merge conflict' ||
                 (steps.merge.outputs.result == 'merged' && steps.tests.outcome != 'success') && 'test failure' ||
@@ -152,16 +157,13 @@ jobs:
           EOF
           )
           # Ensure the label exists BEFORE any gh call that filters on it.
-          # `gh label create` errors if the label already exists; swallow only
-          # that specific case (don't blanket-suppress with 2>/dev/null, which
-          # hid a permission failure on an earlier run).
-          if ! gh label list --search auto-sync --json name --jq '.[].name' | grep -qx auto-sync; then
-            gh label create auto-sync --color B60205 --description "Automated upstream sync"
+          if ! gh label list --repo "$REPO" --search auto-sync --json name --jq '.[].name' | grep -qx auto-sync; then
+            gh label create auto-sync --repo "$REPO" --color B60205 --description "Automated upstream sync"
           fi
-          EXISTING=$(gh issue list --state open --label auto-sync --json number --jq '.[0].number')
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label auto-sync --json number --jq '.[0].number')
           if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "$BODY"
+            gh issue comment "$EXISTING" --repo "$REPO" --body "$BODY"
           else
-            gh issue create --title "$TITLE" --body "$BODY" --label auto-sync
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY" --label auto-sync
           fi
           exit 1
