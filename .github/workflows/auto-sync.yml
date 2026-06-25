@@ -12,6 +12,22 @@ name: auto-sync-upstream
 # Consumers pin `@stable`, so they only ever receive green syncs and are
 # automatically held at the last working version when a sync fails.
 #
+# Authentication model:
+#   Checkout + push use SYNC_TOKEN (a fine-grained PAT with `workflow: write`
+#   scope) instead of the built-in GITHUB_TOKEN. The built-in token cannot
+#   push changes under `.github/workflows/**` (GitHub gates that behind the
+#   `workflow` OAuth scope, which only PATs carry). Using a PAT lets upstream's
+#   workflow changes flow through unchanged. Previously we rejected them with
+#   a blanket revert step, but that caused recurring outages: deletions were
+#   resurrected, fork-safety guards were undone, etc.
+#
+# What we DO still protect: this workflow file itself (auto-sync.yml) and
+# fork-ci.yml. The "Protect fork-owned workflows" step below re-applies our
+# version of those two files if upstream's merge tried to modify them. Every
+# other file under .github/workflows/** is allowed to track upstream verbatim;
+# inherited workflows we don't want stay disabled via `gh workflow disable`,
+# which persists across file content changes.
+#
 # Security: only static commands and trusted context values (github.run_id,
 # github.repository, github.server_url) plus this workflow's own step outputs
 # are used. No untrusted github.event.* input is interpolated into run steps.
@@ -22,9 +38,9 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write    # push main and stable
-  issues: write      # open the failure-report issue
-  actions: write     # required when upstream merges modify .github/workflows/**
+  contents: write    # governs GITHUB_TOKEN (used by the failure-report step).
+  issues: write      # The actual push uses SYNC_TOKEN, which is independent
+  actions: write     # of these permissions.
 
 concurrency:
   group: auto-sync
@@ -44,7 +60,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # PAT, not GITHUB_TOKEN: needed so the later push step can write
+          # changes under .github/workflows/**.
+          token: ${{ secrets.SYNC_TOKEN }}
 
       - name: Configure git
         run: |
@@ -64,32 +82,42 @@ jobs:
               echo "after=$AFTER" >> "$GITHUB_OUTPUT"
               echo "result=up-to-date" >> "$GITHUB_OUTPUT"
             else
-              # GITHUB_TOKEN cannot push .github/workflows/** changes (GitHub
-              # gates that behind the `workflow` OAuth scope, which only PATs
-              # carry). Restore the entire workflows/ directory to its
-              # pre-merge state so the push always succeeds. We must handle
-              # both kinds of upstream change:
-              #   * modifications  -> reset to pre-merge content
-              #   * NEW files       -> `git checkout BEFORE -- path` does NOT
-              #                        remove them; we have to delete them
-              # `git rm -rf` then `git checkout BEFORE --` is the bulletproof
-              # combination: it wipes the directory then restores only what
-              # existed before the merge. Slow drift on workflow files is the
-              # accepted trade-off (most are disabled in this fork anyway).
-              if ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
-                echo "Restoring .github/workflows/ to pre-merge state (cannot push workflow changes)"
-                git rm -rf --quiet --ignore-unmatch .github/workflows/
-                git checkout "$BEFORE" -- .github/workflows/ 2>/dev/null || true
-                if ! git diff --quiet --cached; then
-                  git commit --amend --no-edit
-                fi
-              fi
-              echo "after=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              echo "after=$AFTER" >> "$GITHUB_OUTPUT"
               echo "result=merged" >> "$GITHUB_OUTPUT"
             fi
           else
             git merge --abort
             echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      # After a clean merge, re-apply our version of the two workflows we own
+      # (this one and fork-ci.yml) from the pre-merge tree. If the merge
+      # introduced changes to either, those changes are silently dropped. All
+      # other workflow files are left as upstream merged them.
+      #
+      # This is the surgical replacement for the old blanket revert of
+      # `.github/workflows/**`, which kept causing outages by resurrecting
+      # upstream's deletions and undoing fork-safety guards.
+      - name: Protect fork-owned workflows
+        if: steps.merge.outputs.result == 'merged'
+        env:
+          BEFORE: ${{ steps.merge.outputs.before }}
+        run: |
+          PROTECTED=(.github/workflows/auto-sync.yml .github/workflows/fork-ci.yml)
+          AMENDED=false
+          for f in "${PROTECTED[@]}"; do
+            if ! git diff --quiet "$BEFORE" HEAD -- "$f"; then
+              echo "Restoring $f to pre-merge content"
+              if git cat-file -e "$BEFORE:$f" 2>/dev/null; then
+                git checkout "$BEFORE" -- "$f"
+              else
+                git rm -f --quiet "$f"
+              fi
+              AMENDED=true
+            fi
+          done
+          if [ "$AMENDED" = true ]; then
+            git commit --amend --no-edit
           fi
 
       - name: Set up Python

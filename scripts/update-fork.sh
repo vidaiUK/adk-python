@@ -25,19 +25,26 @@ git checkout "${INTEGRATION_BRANCH}"
 BEFORE=$(git rev-parse HEAD)
 git merge --no-edit upstream/main   # stops here if there are conflicts
 
-# Restore .github/workflows/ to its pre-merge state so disabled workflows
-# stay disabled and the fork's CI surface stays stable. (The auto-sync
-# GitHub workflow does the same; mirroring it here keeps local and
-# automated syncs equivalent.) Must handle both kinds of upstream change:
-#   * modifications -> reset to pre-merge content
-#   * NEW files     -> git checkout BEFORE -- path does NOT delete them
-# `git rm -rf` then `git checkout BEFORE --` is the bulletproof combination.
-if [ "$BEFORE" != "$(git rev-parse HEAD)" ] && \
-   ! git diff --quiet "$BEFORE" HEAD -- .github/workflows/; then
-  echo ">> Restoring .github/workflows/ to pre-merge state (keep fork CI stable)"
-  git rm -rf --quiet --ignore-unmatch .github/workflows/
-  git checkout "$BEFORE" -- .github/workflows/ 2>/dev/null || true
-  if ! git diff --quiet --cached; then
+# Re-apply our version of the two workflows we own. Mirrors the
+# "Protect fork-owned workflows" step in auto-sync.yml, so local and
+# automated syncs produce equivalent trees. Every OTHER workflow file
+# (Copybara, release pipelines, etc.) is allowed to track upstream;
+# inherited workflows we don't want stay disabled via `gh workflow disable`,
+# which persists across file content changes.
+if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
+  AMENDED=false
+  for f in .github/workflows/auto-sync.yml .github/workflows/fork-ci.yml; do
+    if ! git diff --quiet "$BEFORE" HEAD -- "$f"; then
+      echo ">> Restoring $f to pre-merge content"
+      if git cat-file -e "$BEFORE:$f" 2>/dev/null; then
+        git checkout "$BEFORE" -- "$f"
+      else
+        git rm -f --quiet "$f"
+      fi
+      AMENDED=true
+    fi
+  done
+  if [ "$AMENDED" = true ]; then
     git commit --amend --no-edit
   fi
 fi
