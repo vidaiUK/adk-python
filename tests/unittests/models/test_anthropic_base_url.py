@@ -15,8 +15,9 @@
 import os
 from unittest import mock
 
+from google.adk.models.anthropic_llm import AnthropicLlm
+from google.adk.models.anthropic_llm import Claude
 import pytest
-from google.adk.models.anthropic_llm import AnthropicLlm, Claude
 
 
 @mock.patch("google.adk.models.anthropic_llm.AsyncAnthropic")

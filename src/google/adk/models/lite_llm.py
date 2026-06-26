@@ -2350,7 +2350,9 @@ class LiteLlm(BaseLlm):
     llm_client: The LLM client to use for the model.
   """
 
-  base_url: Optional[str] = Field(default_factory=lambda: _resolve_litellm_base_url())
+  base_url: Optional[str] = Field(
+      default_factory=lambda: _resolve_litellm_base_url()
+  )
   """The base URL for the LiteLLM API endpoint.
 
   Resolution order when unset explicitly:

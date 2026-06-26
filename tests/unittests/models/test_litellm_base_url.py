@@ -14,11 +14,11 @@
 
 from unittest import mock
 
-import pytest
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.models.lite_llm import LiteLLMClient
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
+import pytest
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,9 @@ async def test_litellm_passes_base_url_to_acompletion():
   mock_response.usage = None
 
   with mock.patch.object(
-      LiteLLMClient, "acompletion", new=mock.AsyncMock(return_value=mock_response)
+      LiteLLMClient,
+      "acompletion",
+      new=mock.AsyncMock(return_value=mock_response),
   ) as mock_acompletion:
     llm = LiteLlm(model="openai/gpt-4o", base_url=test_url)
 

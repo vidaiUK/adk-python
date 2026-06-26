@@ -15,10 +15,10 @@
 import os
 from unittest import mock
 
-import pytest
 from google.adk.models.anthropic_llm import Claude
 from google.adk.models.google_llm import Gemini
 from google.adk.models.lite_llm import LiteLlm
+import pytest
 
 
 def test_base_url_default_none():
@@ -46,10 +46,16 @@ def test_explicit_base_url_overrides_env():
           "ANTHROPIC_BASE_URL": "http://env.anthropic",
       },
   ):
-    assert Gemini(model="gemini-1.5-flash", base_url=explicit).base_url == explicit
-    assert LiteLlm(model="openai/gpt-4o", base_url=explicit).base_url == explicit
     assert (
-        Claude(model="claude-3-5-sonnet-v2@20241022", base_url=explicit).base_url
+        Gemini(model="gemini-1.5-flash", base_url=explicit).base_url == explicit
+    )
+    assert (
+        LiteLlm(model="openai/gpt-4o", base_url=explicit).base_url == explicit
+    )
+    assert (
+        Claude(
+            model="claude-3-5-sonnet-v2@20241022", base_url=explicit
+        ).base_url
         == explicit
     )
 
@@ -114,7 +120,9 @@ def test_litellm_global_fallback_preserves_existing_version():
     assert LiteLlm(model="openai/gpt-4o").base_url == "http://vidai.proxy/v2"
 
   with mock.patch.dict(
-      os.environ, {"ADK_LLM_BASE_URL": "http://vidai.proxy/v1/extra"}, clear=True
+      os.environ,
+      {"ADK_LLM_BASE_URL": "http://vidai.proxy/v1/extra"},
+      clear=True,
   ):
     assert (
         LiteLlm(model="openai/gpt-4o").base_url == "http://vidai.proxy/v1/extra"
@@ -138,4 +146,6 @@ def test_gemini_and_anthropic_global_fallback_unchanged():
     from google.adk.models.anthropic_llm import AnthropicLlm
 
     assert Gemini(model="gemini-1.5-flash").base_url == "http://vidai.proxy"
-    assert AnthropicLlm(model="claude-3-5-sonnet").base_url == "http://vidai.proxy"
+    assert (
+        AnthropicLlm(model="claude-3-5-sonnet").base_url == "http://vidai.proxy"
+    )

@@ -14,8 +14,8 @@
 
 from __future__ import annotations
 
-import os
 from abc import abstractmethod
+import os
 from typing import AsyncGenerator
 from typing import Optional
 from typing import TYPE_CHECKING
@@ -45,7 +45,7 @@ class BaseLlm(BaseModel):
   """The name of the LLM, e.g. gemini-2.5-flash or gemini-2.5-pro."""
 
   base_url: Optional[str] = Field(
-      default_factory=lambda: os.environ.get("ADK_LLM_BASE_URL")
+      default_factory=lambda: os.environ.get('ADK_LLM_BASE_URL')
   )
   """The base URL for the LLM endpoint.
 
