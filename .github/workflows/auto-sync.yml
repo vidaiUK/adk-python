@@ -143,6 +143,46 @@ jobs:
           git push origin HEAD:"$STABLE_BRANCH"
           echo "Advanced $STABLE_BRANCH to $(git rev-parse --short HEAD)"
 
+      # After a successful merge, re-disable any inherited upstream workflows
+      # we don't want to run on this fork. Why this is needed:
+      #   * `gh workflow disable` flips a workflow to "disabled_manually".
+      #   * That state does NOT survive upstream renaming/rewriting the file:
+      #     a fresh file content can be treated as a new workflow registration,
+      #     which lands in the default "active" state again.
+      #   * We hit this with Continuous Integration (consolidates pre-commit,
+      #     mypy, unit-tests upstream) on 2026-06-26: re-activated by an
+      #     upstream rewrite, then failed because its pre-commit linter runs
+      #     against our base_url patch files and our fork-notice prepends.
+      # The unwanted list is checked by FILENAME (the actions API key), which
+      # is stable across content rewrites within a single file.
+      - name: Re-disable inherited workflows
+        if: steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Filenames of workflows that should stay disabled on this fork.
+          # Add to this list when a new inherited workflow shows up that we
+          # don't want running here.
+          UNWANTED=(
+            continuous-integration.yml
+            copybara-pr-handler.yml
+            release-update-adk-web.yaml
+            pre-commit.yml
+            mypy-new-errors.yml
+            python-unit-tests.yml
+          )
+          for f in "${UNWANTED[@]}"; do
+            # Get the workflow's current state by filename. Skip if not present.
+            STATE=$(gh api "repos/$REPO/actions/workflows/$f" --jq '.state' 2>/dev/null || echo "missing")
+            if [ "$STATE" = "active" ]; then
+              echo "Disabling $f (was active)"
+              gh api -X PUT "repos/$REPO/actions/workflows/$f/disable" >/dev/null
+            else
+              echo "Skipping $f (state: $STATE)"
+            fi
+          done
+
       # --- nothing to do ---
       - name: Up to date
         if: steps.merge.outputs.result == 'up-to-date'
