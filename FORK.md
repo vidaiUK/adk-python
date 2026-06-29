@@ -131,32 +131,100 @@ So a sync only ever becomes the consumer-facing baseline if it is green. A
 failed sync holds every consumer at the last working version and surfaces an
 issue (and a red badge in the README) describing what needs manual review.
 
-**One caveat:** GitHub's built-in `GITHUB_TOKEN` cannot push changes to
-`.github/workflows/**` (that capability requires the `workflow` OAuth scope,
-which only Personal Access Tokens carry). When an upstream merge modifies a
-workflow file, the auto-sync step **reverts that file to the local version**
-and proceeds with the rest of the merge. This fork therefore drifts slowly
-from upstream on workflow files — acceptable here because most inherited
-upstream workflows are already disabled. If you ever need an upstream workflow
-change, sync it manually with `./scripts/update-fork.sh` (which uses your
-personal credentials).
+### Authentication: a PAT, not GITHUB_TOKEN
+
+The built-in `GITHUB_TOKEN` cannot push changes under `.github/workflows/**`
+(GitHub gates that capability behind the `workflow` OAuth scope, which only
+Personal Access Tokens carry). The fork uses a fine-grained PAT stored as the
+repo secret **`SYNC_TOKEN`**, scoped to this repo with `Contents`, `Actions`,
+`Workflows`, `Issues`, and `Pull requests` all set to read+write.
+
+`auto-sync.yml`'s checkout step uses `${{ secrets.SYNC_TOKEN }}`; the
+transitive push inherits it. If the PAT ever expires, the only updates needed
+are to rotate the secret value — the workflow YAML doesn't change.
+
+### Workflow files: track upstream, except two we own
+
+When upstream's merge modifies workflow files under `.github/workflows/**`,
+the new content **flows through verbatim** — except for `auto-sync.yml` and
+`fork-ci.yml`, which the "Protect fork-owned workflows" step re-applies from
+the pre-merge tree.
+
+This is the post-2026-06-25 model. The previous design (revert *all*
+workflow-file changes) caused recurring multi-day outages: it resurrected
+files upstream had deleted, undid upstream's fork-safety guards, and forced
+the same conflicts to recur on every sync. The targeted protection avoids all
+of that.
+
+### Inherited upstream workflows we don't want running
+
+Many upstream workflows (Copybara, Release/Publish-to-PyPI, ADK AI agents,
+Continuous Integration, etc.) shouldn't run on this fork. They're disabled
+once via the UI or `gh workflow disable`, but **`disabled_manually` does not
+persist across upstream rewriting the file** — a new file content can be
+treated as a new workflow registration and lands back in the default `active`
+state.
+
+The durable fix is a step in `auto-sync.yml` called **"Re-disable inherited
+workflows"** that runs after every successful publish. It loops through a
+hard-coded list of unwanted workflow filenames and re-disables any that are
+currently active. To add to the list, edit the `UNWANTED=(...)` array in
+that step.
+
+Current list:
+```
+continuous-integration.yml      release-update-adk-web.yaml
+copybara-pr-handler.yml         pre-commit.yml
+mypy-new-errors.yml             python-unit-tests.yml
+```
 
 ### Recovering from a failed sync
 
-When the `auto-sync` issue appears:
+When the `auto-sync` issue appears (and Slack pings):
 
 ```bash
-./scripts/update-fork.sh        # merges upstream, runs tests locally
-# resolve the conflict / fix the failing test, then:
+# 1. Resync local to the published state, so update-fork.sh produces the same
+#    conflict as the bot's run instead of a giant fake catch-up pile.
+git fetch origin && git reset --hard origin/main
+
+# 2. Re-attempt the merge locally.
+./scripts/update-fork.sh
+#    - This mirrors auto-sync.yml's logic (merge + protect fork-owned files).
+#    - It stops if there's a conflict; resolve it manually:
+#        - `git checkout --theirs <file>` for upstream files
+#        - For our 4 patch files (base_llm.py, google_llm.py,
+#          anthropic_llm.py, lite_llm.py), keep ours
+#    - Then `git add` and `git merge --continue`.
+
+# 3. Re-run tests.
+.venv/bin/python -m pytest tests/unittests/models/ \
+    --ignore=tests/unittests/models/test_interactions_utils.py -q
+
+# 4. Publish.
 git push origin main
 git push origin main:stable   # fast-forward stable once green
 ```
 
 Optionally snapshot a release: `git tag -a fork-vX.Y.Z -m "..." && git push origin fork-vX.Y.Z`.
 
+### Distinguishing real sync failures from CI lint noise
+
+GitHub renders any failed check on a commit as the same red ❌. Two very
+different situations both produce that mark:
+
+| Symptom | What's wrong |
+|---|---|
+| Open issue with `auto-sync` label + `upstream sync` badge red | **Real sync failure.** Run `./scripts/update-fork.sh` to recover. |
+| Red ❌ on a commit but no `auto-sync` issue | **Upstream CI noise** (most often `Continuous Integration / Pre-commit Linter`). Not blocking. If it persists, add the workflow to the `UNWANTED=` list and push. |
+
+The two README badges (`upstream sync` and `fork ci`) are the at-a-glance
+health surface. The per-commit ❌ is noisier and can mislead.
+
 ### CI
 
-[`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) additionally
-runs the model tests on every **code** push to `main`, so manual pushes are
-checked too. Doc-only changes (`*.md`, `LICENSE`, `docs/`, …) skip the suite —
-they cannot affect tests.
+[`.github/workflows/fork-ci.yml`](.github/workflows/fork-ci.yml) is the
+authoritative signal for the fork. It runs the model tests on every **code**
+push to `main` and weekly via cron, with
+`--ignore=tests/unittests/models/test_interactions_utils.py` (an upstream
+test that's broken on the published `google-genai` release). Doc-only changes
+(`*.md`, `LICENSE`, `docs/`, …) skip the suite — they cannot affect tests.
