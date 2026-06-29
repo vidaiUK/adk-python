@@ -226,5 +226,7 @@ health surface. The per-commit ❌ is noisier and can mislead.
 authoritative signal for the fork. It runs the model tests on every **code**
 push to `main` and weekly via cron, with
 `--ignore=tests/unittests/models/test_interactions_utils.py` (an upstream
-test that's broken on the published `google-genai` release). Doc-only changes
-(`*.md`, `LICENSE`, `docs/`, …) skip the suite — they cannot affect tests.
+test that's broken on the published `google-genai` release). It runs on
+**every** push to `main`, including doc-only commits, so every commit
+carries a green tick — GitHub's UI renders "no checks ran" as a red ❌ on
+the repo header, which is misleading on doc commits.

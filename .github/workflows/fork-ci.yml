@@ -1,30 +1,24 @@
 name: fork-ci
 
 # CI for the vidaiUK/adk-python fork.
-# Runs the model tests on every code push to `main`, and weekly so
+# Runs the model tests on every push to `main`, plus weekly via cron so
 # upstream-incompatibility is caught on a schedule rather than mid-emergency.
-# Doc-only changes (see paths-ignore) skip the suite — they cannot affect tests.
+#
+# Previously this had a `paths-ignore` filter so doc commits skipped CI. That
+# created a problem: GitHub's UI renders "no checks ran on this commit" as a
+# neutral or missing status mark, which looked like a red X on the repo
+# header. Since the model suite runs in ~10 seconds, the cost of running it
+# on doc commits is negligible — and the benefit is that EVERY commit on main
+# carries a green tick. Don't reintroduce paths-ignore unless you can show
+# the GitHub UI no longer renders "no checks" as red.
+#
 # Note: uses only static commands - no untrusted github.event.* input.
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'docs/**'
-      - 'assets/**'
-      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'docs/**'
-      - 'assets/**'
-      - '.github/ISSUE_TEMPLATE/**'
   schedule:
     - cron: '0 6 * * 1'  # Mondays 06:00 UTC
   workflow_dispatch: {}
