@@ -147,14 +147,35 @@ are to rotate the secret value — the workflow YAML doesn't change.
 
 When upstream's merge modifies workflow files under `.github/workflows/**`,
 the new content **flows through verbatim** — except for `auto-sync.yml` and
-`fork-ci.yml`, which the "Protect fork-owned workflows" step re-applies from
-the pre-merge tree.
+`fork-ci.yml`, which are protected.
 
-This is the post-2026-06-25 model. The previous design (revert *all*
-workflow-file changes) caused recurring multi-day outages: it resurrected
-files upstream had deleted, undid upstream's fork-safety guards, and forced
-the same conflicts to recur on every sync. The targeted protection avoids all
-of that.
+The mechanism is `.gitattributes`, which declares merge strategies per path:
+
+```
+/.github/workflows/**              merge=theirs
+/.github/workflows/auto-sync.yml   merge=ours
+/.github/workflows/fork-ci.yml     merge=ours
+```
+
+`merge=ours` ships with git; `merge=theirs` is a custom driver registered
+by the Configure git step: `git config merge.theirs.driver 'cp -f "%B" "%A"'`.
+Both `auto-sync.yml` and `update-fork.sh` register it.
+
+Merge drivers only cover **content** conflicts. The **modify/delete** case
+(where one side deletes and the other modifies) is a tree-level conflict
+that bypasses drivers, so the Merge step has a post-merge fallback that
+auto-resolves those too: take upstream's version for files we don't own,
+or accept the delete if upstream deleted it.
+
+Under this design, **workflow-file conflicts never block a sync**. Real
+conflicts in source or tests still stop the merge for human review, as
+intended.
+
+This replaced two earlier designs that caused recurring outages: (1) a
+blanket revert of `.github/workflows/**` that resurrected upstream's
+deletions and undid fork-safety guards; (2) a targeted "Protect fork-owned
+workflows" step that ran only after a successful merge, so any conflict
+in an inherited workflow file would still block the sync entirely.
 
 ### Inherited upstream workflows we don't want running
 
