@@ -2,31 +2,32 @@ name: auto-sync-upstream
 
 # Automatically syncs the fork with upstream google/adk-python.
 #
-# Flow:
-#   1. Merge upstream into main (the integration branch).
-#   2. If the merge conflicts -> stop, open an issue, leave `stable` untouched.
-#   3. If clean -> install + run the model tests.
-#   4. Tests pass -> fast-forward `stable` to the new commit (the new baseline).
-#   5. Tests fail -> stop, open an issue, leave `stable` untouched.
+# Flow (delegated to functions in scripts/lib/sync-core.sh):
+#   1. Merge upstream into main. Content conflicts under .github/workflows/**
+#      auto-resolve via .gitattributes; modify/delete conflicts there
+#      auto-resolve in sync_merge_upstream. Real conflicts stop the merge.
+#   2. Protect the two fork-owned workflow files (belt-and-braces, in case
+#      .gitattributes itself got rewritten by the same merge).
+#   3. Install + run the model tests.
+#   4. Tests pass -> publish (advance both main and stable).
+#   5. Re-disable inherited upstream workflows that may have re-activated.
+#   6. Any failure -> open (or comment on the existing) auto-sync issue.
 #
 # Consumers pin `@stable`, so they only ever receive green syncs and are
 # automatically held at the last working version when a sync fails.
+#
+# WHY THE SHARED LIBRARY: this workflow AND scripts/update-fork.sh both
+# source scripts/lib/sync-core.sh, so manual and automated recoveries
+# execute mechanically-identical logic. Missing that parity caused an
+# outage on 2026-07-02: the re-disable step lived only in this YAML, so
+# a manual recovery via update-fork.sh left Continuous Integration
+# active, which then failed on lint against our patch.
 #
 # Authentication model:
 #   Checkout + push use SYNC_TOKEN (a fine-grained PAT with `workflow: write`
 #   scope) instead of the built-in GITHUB_TOKEN. The built-in token cannot
 #   push changes under `.github/workflows/**` (GitHub gates that behind the
-#   `workflow` OAuth scope, which only PATs carry). Using a PAT lets upstream's
-#   workflow changes flow through unchanged. Previously we rejected them with
-#   a blanket revert step, but that caused recurring outages: deletions were
-#   resurrected, fork-safety guards were undone, etc.
-#
-# What we DO still protect: this workflow file itself (auto-sync.yml) and
-# fork-ci.yml. The "Protect fork-owned workflows" step below re-applies our
-# version of those two files if upstream's merge tried to modify them. Every
-# other file under .github/workflows/** is allowed to track upstream verbatim;
-# inherited workflows we don't want stay disabled via `gh workflow disable`,
-# which persists across file content changes.
+#   `workflow` OAuth scope, which only PATs carry).
 #
 # Security: only static commands and trusted context values (github.run_id,
 # github.repository, github.server_url) plus this workflow's own step outputs
@@ -64,107 +65,31 @@ jobs:
           # changes under .github/workflows/**.
           token: ${{ secrets.SYNC_TOKEN }}
 
-      - name: Configure git
+      - name: Configure git and merge drivers
         run: |
-          git config user.name  "adk-fork-bot"
-          git config user.email "adk-fork-bot@users.noreply.github.com"
-          # Register merge drivers referenced by .gitattributes.
-          # `ours` ships with git (keeps the current version). `theirs` does
-          # NOT ship with git — the classic one-liner is `cp -f "%B" "%A"`,
-          # which replaces the current tree's version (%A) with the other
-          # side's (%B). This lets .gitattributes make workflow-file
-          # conflicts under .github/workflows/** resolve automatically:
-          # take upstream for files we don't own, take ours for the two we
-          # do own (auto-sync.yml, fork-ci.yml).
-          git config merge.theirs.driver 'cp -f "%B" "%A"'
-          git config merge.theirs.name   'take theirs'
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_configure_git
 
       - name: Merge upstream
         id: merge
         run: |
-          git remote add upstream "$UPSTREAM_REPO"
-          git fetch upstream main
-          BEFORE=$(git rev-parse HEAD)
-          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
-          # We attempt the merge. If it leaves conflicts, we try to auto-
-          # resolve any that lie under .github/workflows/** (which are never
-          # "ours to review") before giving up. Content conflicts there are
-          # already handled by .gitattributes' merge=theirs. What's left is
-          # the modify/delete case, which merge drivers don't cover.
-          if git merge --no-edit upstream/main; then
-            :   # clean merge, fall through
-          else
-            # Resolve every unmerged workflow file we don't own.
-            WORKFLOW_CONFLICTS=$(git diff --name-only --diff-filter=U -- .github/workflows/ || true)
-            for f in $WORKFLOW_CONFLICTS; do
-              case "$f" in
-                .github/workflows/auto-sync.yml|.github/workflows/fork-ci.yml)
-                  git checkout --ours -- "$f" && git add "$f"
-                  echo "auto-resolved (ours): $f"
-                  ;;
-                *)
-                  # Try to take upstream's version. If upstream deleted it,
-                  # the checkout fails and we `git rm` instead — that's the
-                  # correct "accept the delete" resolution.
-                  if git checkout --theirs -- "$f" 2>/dev/null; then
-                    git add "$f"
-                  else
-                    git rm -f -- "$f"
-                  fi
-                  echo "auto-resolved (theirs): $f"
-                  ;;
-              esac
-            done
-            # Any conflicts left after workflow-file auto-resolution are
-            # in source or tests — real work for a human. Abort in that
-            # case; otherwise commit the auto-resolutions.
-            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-              echo "conflicts remain outside .github/workflows/**:"
-              git diff --name-only --diff-filter=U
-              git merge --abort
-              echo "result=conflict" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            git commit --no-edit
-          fi
-          AFTER=$(git rev-parse HEAD)
-          if [ "$BEFORE" = "$AFTER" ]; then
-            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
-            echo "result=up-to-date" >> "$GITHUB_OUTPUT"
-          else
-            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
-            echo "result=merged" >> "$GITHUB_OUTPUT"
-          fi
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_ensure_upstream_remote
+          sync_merge_upstream
+          echo "before=$SYNC_BEFORE" >> "$GITHUB_OUTPUT"
+          echo "after=$SYNC_AFTER"   >> "$GITHUB_OUTPUT"
+          echo "result=$SYNC_RESULT" >> "$GITHUB_OUTPUT"
 
-      # After a clean merge, re-apply our version of the two workflows we own
-      # (this one and fork-ci.yml) from the pre-merge tree. If the merge
-      # introduced changes to either, those changes are silently dropped. All
-      # other workflow files are left as upstream merged them.
-      #
-      # This is the surgical replacement for the old blanket revert of
-      # `.github/workflows/**`, which kept causing outages by resurrecting
-      # upstream's deletions and undoing fork-safety guards.
+      # Belt-and-braces: if the same merge that changed our workflow files
+      # ALSO rewrote .gitattributes, merge=ours might not have been in
+      # effect. Re-restore our version of the two we own from pre-merge.
       - name: Protect fork-owned workflows
         if: steps.merge.outputs.result == 'merged'
         env:
           BEFORE: ${{ steps.merge.outputs.before }}
         run: |
-          PROTECTED=(.github/workflows/auto-sync.yml .github/workflows/fork-ci.yml)
-          AMENDED=false
-          for f in "${PROTECTED[@]}"; do
-            if ! git diff --quiet "$BEFORE" HEAD -- "$f"; then
-              echo "Restoring $f to pre-merge content"
-              if git cat-file -e "$BEFORE:$f" 2>/dev/null; then
-                git checkout "$BEFORE" -- "$f"
-              else
-                git rm -f --quiet "$f"
-              fi
-              AMENDED=true
-            fi
-          done
-          if [ "$AMENDED" = true ]; then
-            git commit --amend --no-edit
-          fi
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_protect_fork_workflows "$BEFORE"
 
       - name: Set up Python
         if: steps.merge.outputs.result == 'merged'
@@ -185,49 +110,24 @@ jobs:
       - name: Publish new baseline
         if: steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success'
         run: |
-          git push origin HEAD:"$INTEGRATION_BRANCH"
-          git push origin HEAD:"$STABLE_BRANCH"
-          echo "Advanced $STABLE_BRANCH to $(git rev-parse --short HEAD)"
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_publish_baseline
 
-      # After a successful merge, re-disable any inherited upstream workflows
-      # we don't want to run on this fork. Why this is needed:
-      #   * `gh workflow disable` flips a workflow to "disabled_manually".
-      #   * That state does NOT survive upstream renaming/rewriting the file:
-      #     a fresh file content can be treated as a new workflow registration,
-      #     which lands in the default "active" state again.
-      #   * We hit this with Continuous Integration (consolidates pre-commit,
-      #     mypy, unit-tests upstream) on 2026-06-26: re-activated by an
-      #     upstream rewrite, then failed because its pre-commit linter runs
-      #     against our base_url patch files and our fork-notice prepends.
-      # The unwanted list is checked by FILENAME (the actions API key), which
-      # is stable across content rewrites within a single file.
+      # Re-disable any inherited upstream workflows that may have re-activated.
+      # Runs on BOTH the merged-and-green path AND the up-to-date path so an
+      # inherited workflow that quietly re-activated between our syncs (e.g.
+      # because someone pushed to main directly, touching workflow files) still
+      # gets caught. See sync-core.sh's UNWANTED_INHERITED_WORKFLOWS list.
       - name: Re-disable inherited workflows
-        if: steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success'
+        if: >-
+          steps.merge.outputs.result == 'up-to-date' ||
+          (steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          # Filenames of workflows that should stay disabled on this fork.
-          # Add to this list when a new inherited workflow shows up that we
-          # don't want running here.
-          UNWANTED=(
-            continuous-integration.yml
-            copybara-pr-handler.yml
-            release-update-adk-web.yaml
-            pre-commit.yml
-            mypy-new-errors.yml
-            python-unit-tests.yml
-          )
-          for f in "${UNWANTED[@]}"; do
-            # Get the workflow's current state by filename. Skip if not present.
-            STATE=$(gh api "repos/$REPO/actions/workflows/$f" --jq '.state' 2>/dev/null || echo "missing")
-            if [ "$STATE" = "active" ]; then
-              echo "Disabling $f (was active)"
-              gh api -X PUT "repos/$REPO/actions/workflows/$f/disable" >/dev/null
-            else
-              echo "Skipping $f (state: $STATE)"
-            fi
-          done
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_redisable_inherited_workflows
 
       # --- nothing to do ---
       - name: Up to date
