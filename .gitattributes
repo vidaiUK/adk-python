@@ -1,0 +1,25 @@
+# Merge strategy for the vidaiUK/adk-python fork.
+#
+# When merging upstream/main, we do NOT want workflow-file conflicts to block
+# the sync. Almost all workflow files are inherited from upstream and we don't
+# patch them — we just disable the ones we don't want to run (see
+# .github/workflows/auto-sync.yml, "Re-disable inherited workflows" step).
+# So on any merge conflict under .github/workflows/**, always take upstream's
+# version.
+#
+# The two exceptions are the workflows we own — auto-sync.yml and fork-ci.yml.
+# Those use `merge=ours` so upstream can never overwrite them.
+#
+# NOTE: later rules override earlier ones. The generic ** rule must come
+# BEFORE the specific carve-outs.
+#
+# See the "Register the merge drivers" step in auto-sync.yml and the same
+# in scripts/update-fork.sh — the drivers must be registered in git config
+# for these attributes to take effect.
+
+# All workflow files default to "take upstream"
+/.github/workflows/**              merge=theirs
+
+# Workflows we own — always keep ours (override the generic rule above)
+/.github/workflows/auto-sync.yml   merge=ours
+/.github/workflows/fork-ci.yml     merge=ours

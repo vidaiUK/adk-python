@@ -17,36 +17,47 @@ if ! git remote get-url upstream >/dev/null 2>&1; then
   git remote add upstream https://github.com/google/adk-python.git
 fi
 
+# Register merge drivers referenced by .gitattributes.
+git config merge.theirs.driver 'cp -f "%B" "%A"' || true
+git config merge.theirs.name   'take theirs' || true
+
 echo ">> Fetching upstream..."
 git fetch upstream main --prune
 
 echo ">> Merging upstream/main into ${INTEGRATION_BRANCH}..."
 git checkout "${INTEGRATION_BRANCH}"
 BEFORE=$(git rev-parse HEAD)
-git merge --no-edit upstream/main   # stops here if there are conflicts
 
-# Re-apply our version of the two workflows we own. Mirrors the
-# "Protect fork-owned workflows" step in auto-sync.yml, so local and
-# automated syncs produce equivalent trees. Every OTHER workflow file
-# (Copybara, release pipelines, etc.) is allowed to track upstream;
-# inherited workflows we don't want stay disabled via `gh workflow disable`,
-# which persists across file content changes.
-if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
-  AMENDED=false
-  for f in .github/workflows/auto-sync.yml .github/workflows/fork-ci.yml; do
-    if ! git diff --quiet "$BEFORE" HEAD -- "$f"; then
-      echo ">> Restoring $f to pre-merge content"
-      if git cat-file -e "$BEFORE:$f" 2>/dev/null; then
-        git checkout "$BEFORE" -- "$f"
-      else
-        git rm -f --quiet "$f"
-      fi
-      AMENDED=true
-    fi
+# Same auto-resolution logic as auto-sync.yml — see that file for the
+# rationale. Workflow-file conflicts under .github/workflows/** (except
+# the two we own) get auto-resolved so we never stop on inherited-CI
+# churn. Real conflicts in source/tests still stop the script.
+if ! git merge --no-edit upstream/main; then
+  WORKFLOW_CONFLICTS=$(git diff --name-only --diff-filter=U -- .github/workflows/ || true)
+  for f in $WORKFLOW_CONFLICTS; do
+    case "$f" in
+      .github/workflows/auto-sync.yml|.github/workflows/fork-ci.yml)
+        git checkout --ours -- "$f" && git add "$f"
+        echo ">> auto-resolved (ours): $f"
+        ;;
+      *)
+        if git checkout --theirs -- "$f" 2>/dev/null; then
+          git add "$f"
+        else
+          git rm -f -- "$f"
+        fi
+        echo ">> auto-resolved (theirs): $f"
+        ;;
+    esac
   done
-  if [ "$AMENDED" = true ]; then
-    git commit --amend --no-edit
+  # Any conflicts left are real work.
+  if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+    echo ">> Real conflicts remain (outside .github/workflows/**):"
+    git diff --name-only --diff-filter=U
+    echo ">> Resolve manually, then: git merge --continue"
+    exit 1
   fi
+  git commit --no-edit
 fi
 
 echo ">> Running model tests..."

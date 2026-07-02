@@ -68,6 +68,16 @@ jobs:
         run: |
           git config user.name  "adk-fork-bot"
           git config user.email "adk-fork-bot@users.noreply.github.com"
+          # Register merge drivers referenced by .gitattributes.
+          # `ours` ships with git (keeps the current version). `theirs` does
+          # NOT ship with git — the classic one-liner is `cp -f "%B" "%A"`,
+          # which replaces the current tree's version (%A) with the other
+          # side's (%B). This lets .gitattributes make workflow-file
+          # conflicts under .github/workflows/** resolve automatically:
+          # take upstream for files we don't own, take ours for the two we
+          # do own (auto-sync.yml, fork-ci.yml).
+          git config merge.theirs.driver 'cp -f "%B" "%A"'
+          git config merge.theirs.name   'take theirs'
 
       - name: Merge upstream
         id: merge
@@ -76,18 +86,54 @@ jobs:
           git fetch upstream main
           BEFORE=$(git rev-parse HEAD)
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          # We attempt the merge. If it leaves conflicts, we try to auto-
+          # resolve any that lie under .github/workflows/** (which are never
+          # "ours to review") before giving up. Content conflicts there are
+          # already handled by .gitattributes' merge=theirs. What's left is
+          # the modify/delete case, which merge drivers don't cover.
           if git merge --no-edit upstream/main; then
-            AFTER=$(git rev-parse HEAD)
-            if [ "$BEFORE" = "$AFTER" ]; then
-              echo "after=$AFTER" >> "$GITHUB_OUTPUT"
-              echo "result=up-to-date" >> "$GITHUB_OUTPUT"
-            else
-              echo "after=$AFTER" >> "$GITHUB_OUTPUT"
-              echo "result=merged" >> "$GITHUB_OUTPUT"
-            fi
+            :   # clean merge, fall through
           else
-            git merge --abort
-            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            # Resolve every unmerged workflow file we don't own.
+            WORKFLOW_CONFLICTS=$(git diff --name-only --diff-filter=U -- .github/workflows/ || true)
+            for f in $WORKFLOW_CONFLICTS; do
+              case "$f" in
+                .github/workflows/auto-sync.yml|.github/workflows/fork-ci.yml)
+                  git checkout --ours -- "$f" && git add "$f"
+                  echo "auto-resolved (ours): $f"
+                  ;;
+                *)
+                  # Try to take upstream's version. If upstream deleted it,
+                  # the checkout fails and we `git rm` instead — that's the
+                  # correct "accept the delete" resolution.
+                  if git checkout --theirs -- "$f" 2>/dev/null; then
+                    git add "$f"
+                  else
+                    git rm -f -- "$f"
+                  fi
+                  echo "auto-resolved (theirs): $f"
+                  ;;
+              esac
+            done
+            # Any conflicts left after workflow-file auto-resolution are
+            # in source or tests — real work for a human. Abort in that
+            # case; otherwise commit the auto-resolutions.
+            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+              echo "conflicts remain outside .github/workflows/**:"
+              git diff --name-only --diff-filter=U
+              git merge --abort
+              echo "result=conflict" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git commit --no-edit
+          fi
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
+            echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+          else
+            echo "after=$AFTER" >> "$GITHUB_OUTPUT"
+            echo "result=merged" >> "$GITHUB_OUTPUT"
           fi
 
       # After a clean merge, re-apply our version of the two workflows we own
