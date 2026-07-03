@@ -28,24 +28,34 @@
 : "${UPSTREAM_REPO:=https://github.com/google/adk-python.git}"
 : "${REPO:=vidaiUK/adk-python}"
 
-# Files where our version always wins on merge. Kept in sync with
-# .gitattributes' merge=ours declarations.
+# The workflows we own on this fork. Everything else under
+# .github/workflows/** is considered inherited-from-upstream, whether
+# it exists today or arrives on a future merge.
+#
+# Two things flow from this single list:
+#   1. `sync_merge_upstream` treats these paths as `merge=ours` at
+#      conflict-resolution time (kept in sync with .gitattributes).
+#   2. `sync_redisable_inherited_workflows` uses the BASENAMES to build
+#      an allowlist; every OTHER active workflow on the repo gets
+#      disabled after every sync.
+#
+# Rationale for "disable everything else": upstream's CI (Continuous
+# Integration, pre-commit linters, mypy, unit-test matrices,
+# release/copybara/agent workflows, etc.) exists to protect the ADK
+# codebase THEY ship. On our fork, our only responsibility is to prove
+# that our env-var patch works — fork-ci.yml is the entire story on
+# our side. Running upstream's full CI on this fork is strictly noise:
+# it fails on lint against our patch, on infra that doesn't exist
+# here (Copybara, PyPI publishing), and on flaky tests we don't own.
+# It also gets in a race with a hardcoded-list disable step because a
+# workflow-file rewrite in the same merge causes a transient "deleted"
+# state we skip past (see 2026-07-03 outage).
+#
+# When adding a new fork-owned workflow: (a) add it to this array,
+# (b) add a `merge=ours` line to .gitattributes for the same path.
 FORK_OWNED_WORKFLOWS=(
   .github/workflows/auto-sync.yml
   .github/workflows/fork-ci.yml
-)
-
-# Inherited upstream workflows we don't want running on the fork.
-# Add a filename here when a new one shows up in the "recent runs" list
-# failing for fork-inapplicable reasons.
-UNWANTED_INHERITED_WORKFLOWS=(
-  continuous-integration.yml
-  copybara-pr-handler.yml
-  release-update-adk-web.yaml
-  pre-commit.yml
-  mypy-new-errors.yml
-  python-unit-tests.yml
-  block-merge.yml
 )
 
 sync_configure_git() {
@@ -155,21 +165,62 @@ sync_protect_fork_workflows() {
   fi
 }
 
-# Re-disable any UNWANTED_INHERITED_WORKFLOWS that are currently active.
-# GitHub silently re-activates a workflow when upstream rewrites the file
-# — `disabled_manually` does NOT survive that. Idempotent: skips workflows
-# that are already disabled, deleted, or missing.
+# Disable every workflow on the repo that isn't in FORK_OWNED_WORKFLOW_BASENAMES.
+#
+# This is the "upstream CI is upstream's problem" rule expressed in code.
+# Anything active that we don't own gets disabled, regardless of whether we've
+# seen it before. This means:
+#   * No UNWANTED list to maintain. New inherited workflows added by upstream
+#     land already-disabled after the next sync.
+#   * A workflow that re-activates due to an upstream file rewrite gets
+#     re-disabled on the next sync, not after we notice red X.
+#   * The one race we can't prevent: a workflow that fires ONCE during the
+#     transient window between our push landing and the disable step running.
+#     That single fire produces at most one red X per sync, and only for
+#     push-triggered workflows. Consumers pin @stable which is already green.
 sync_redisable_inherited_workflows() {
-  local f state
-  for f in "${UNWANTED_INHERITED_WORKFLOWS[@]}"; do
-    state=$(gh api "repos/$REPO/actions/workflows/$f" --jq '.state' 2>/dev/null || echo "missing")
-    if [ "$state" = "active" ]; then
-      echo "  disabling $f (was active)"
-      gh api -X PUT "repos/$REPO/actions/workflows/$f/disable" >/dev/null
-    else
-      echo "  skipping $f (state: $state)"
-    fi
+  # Derive the basename allowlist from FORK_OWNED_WORKFLOWS (single source
+  # of truth). GitHub's actions/workflows API keys are basenames, not
+  # full paths, so we strip the leading .github/workflows/ prefix.
+  local basenames_joined="" f base
+  for f in "${FORK_OWNED_WORKFLOWS[@]}"; do
+    base="${f##*/}"
+    basenames_joined="${basenames_joined}|${base}"
   done
+  basenames_joined="${basenames_joined:1}"   # drop leading '|'
+
+  # Enumerate all workflows on the repo, one per line as "state<TAB>basename".
+  local rows
+  rows=$(gh api "repos/$REPO/actions/workflows" --paginate \
+           --jq '.workflows[] | "\(.state)\t\(.path | sub(".*/"; ""))"' 2>/dev/null || true)
+
+  if [ -z "$rows" ]; then
+    echo "  (no workflows returned by API — nothing to do)"
+    return 0
+  fi
+
+  local disabled_count=0
+  local kept_count=0
+  local state basename
+  while IFS=$'\t' read -r state basename; do
+    [ -z "$basename" ] && continue
+    # Skip anything in the fork-owned allowlist.
+    case "|$basenames_joined|" in
+      *"|$basename|"*)
+        echo "  keeping (fork-owned): $basename [state=$state]"
+        kept_count=$((kept_count + 1))
+        continue
+        ;;
+    esac
+    # For everything else: if active, disable. Otherwise leave it.
+    if [ "$state" = "active" ]; then
+      echo "  disabling inherited: $basename"
+      gh api -X PUT "repos/$REPO/actions/workflows/$basename/disable" >/dev/null
+      disabled_count=$((disabled_count + 1))
+    fi
+  done <<< "$rows"
+
+  echo "  summary: $disabled_count disabled this run, $kept_count kept (fork-owned)"
 }
 
 # Push main and fast-forward stable. This is the "advance the baseline"
