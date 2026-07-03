@@ -45,6 +45,7 @@ UNWANTED_INHERITED_WORKFLOWS=(
   pre-commit.yml
   mypy-new-errors.yml
   python-unit-tests.yml
+  block-merge.yml
 )
 
 sync_configure_git() {
