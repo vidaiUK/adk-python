@@ -23,7 +23,6 @@ from typing import Any
 from typing import AsyncGenerator
 from typing import Awaitable
 from typing import Callable
-from typing import cast
 from typing import ClassVar
 from typing import Dict
 from typing import Literal
@@ -64,6 +63,7 @@ from .base_agent import BaseAgent
 from .base_agent import BaseAgentState
 from .base_agent_config import BaseAgentConfig as BaseAgentConfig
 from .callback_context import CallbackContext
+from .context import Context
 from .invocation_context import InvocationContext
 from .llm_agent_config import LlmAgentConfig as LlmAgentConfig
 from .readonly_context import ReadonlyContext
@@ -138,7 +138,7 @@ ToolUnion: TypeAlias = Union[Callable, BaseTool, BaseToolset]
 
 async def _convert_tool_union_to_tools(
     tool_union: ToolUnion,
-    ctx: ReadonlyContext,
+    ctx: Optional[ReadonlyContext],
     model: Union[str, BaseLlm],
     multiple_tools: bool = False,
 ) -> list[BaseTool]:
@@ -152,7 +152,7 @@ async def _convert_tool_union_to_tools(
     from ..tools.google_search_agent_tool import create_google_search_agent
     from ..tools.google_search_agent_tool import GoogleSearchAgentTool
 
-    search_tool = cast(GoogleSearchTool, tool_union)
+    search_tool = tool_union
     if search_tool.bypass_multi_tools_limit:
       return [GoogleSearchAgentTool(create_google_search_agent(model))]
 
@@ -163,7 +163,7 @@ async def _convert_tool_union_to_tools(
   if multiple_tools and isinstance(tool_union, VertexAiSearchTool):
     from ..tools.discovery_engine_search_tool import DiscoveryEngineSearchTool
 
-    vais_tool = cast(VertexAiSearchTool, tool_union)
+    vais_tool = tool_union
     if vais_tool.bypass_multi_tools_limit:
       return [
           DiscoveryEngineSearchTool(
@@ -927,7 +927,7 @@ class LlmAgent(BaseAgent, abc.ABC):
     """
     agents = []
 
-    def collect_agents(agent):
+    def collect_agents(agent: BaseAgent) -> None:
       agents.append(agent.name)
       if hasattr(agent, 'sub_agents') and agent.sub_agents:
         for sub_agent in agent.sub_agents:
@@ -952,7 +952,7 @@ class LlmAgent(BaseAgent, abc.ABC):
         return self.__get_agent_to_run(event.actions.transfer_to_agent)
     return None
 
-  def __maybe_save_output_to_state(self, event: Event):
+  def __maybe_save_output_to_state(self, event: Event) -> None:
     """Saves the model output to state if needed."""
     # skip if the event was authored by some other agent (e.g. current agent
     # transferred to another agent)

@@ -408,7 +408,7 @@ class RemoteA2aAgent(BaseAgent):
     return a2a_message
 
   def _is_remote_response(self, event: Event) -> bool:
-    return (
+    return bool(
         event.author == self.name
         and event.custom_metadata
         and event.custom_metadata.get(A2A_METADATA_PREFIX + "response", False)
@@ -448,22 +448,27 @@ class RemoteA2aAgent(BaseAgent):
       events_to_process.append(event)
 
     for event in reversed(events_to_process):
+      processed_event: Optional[Event] = event
       if _is_other_agent_reply(self.name, event):
-        event = _present_other_agent_message(event)
+        processed_event = _present_other_agent_message(event)
 
-      if not event or not event.content or not event.content.parts:
+      if (
+          not processed_event
+          or not processed_event.content
+          or not processed_event.content.parts
+      ):
         continue
 
-      for part in event.content.parts:
+      for part in processed_event.content.parts:
         converted_parts = self._genai_part_converter(part)
         if not isinstance(converted_parts, list):
           converted_parts = [converted_parts] if converted_parts else []
 
-        if event.author == "user":
-          for part in converted_parts:
-            meta = _compat.part_metadata(part) or {}
+        if processed_event.author == "user":
+          for a2a_part in converted_parts:
+            meta = _compat.part_metadata(a2a_part) or {}
             meta["is_user_input"] = True
-            _compat.set_part_metadata(part, meta)
+            _compat.set_part_metadata(a2a_part, meta)
 
         if converted_parts:
           message_parts.extend(converted_parts)

@@ -302,6 +302,74 @@ class TestAgentRegistry:
     agents = registry.list_agents()
     assert agents == {"agents": []}
 
+  def test_search_agents(self, registry):
+    """Tests search_agents API call."""
+    # pylint: disable=protected-access
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"agents": [{"name": "agent-1"}]}
+    mock_response.raise_for_status = MagicMock()
+    registry._session.post.return_value = mock_response
+
+    registry._credentials.token = "token"
+    registry._credentials.refresh = MagicMock()
+
+    agents = registry.search_agents(
+        search_string="test-agent",
+        search_type="KEYWORD",
+        filter_str="display_name:test",
+        order_by="name",
+        page_size=10,
+        page_token="next-token",
+    )
+    assert agents == {"agents": [{"name": "agent-1"}]}
+    registry._session.post.assert_called_once_with(
+        f"{registry._base_url}/projects/test-project/locations/global/agents:search",
+        headers={"x-goog-user-project": "test-project"},
+        json={
+            "searchString": "test-agent",
+            "searchType": "KEYWORD",
+            "filter": "display_name:test",
+            "orderBy": "name",
+            "pageSize": 10,
+            "pageToken": "next-token",
+        },
+    )
+    # pylint: enable=protected-access
+
+  def test_search_mcp_servers(self, registry):
+    """Tests search_mcp_servers API call."""
+    # pylint: disable=protected-access
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"mcpServers": [{"name": "mcp-1"}]}
+    mock_response.raise_for_status = MagicMock()
+    registry._session.post.return_value = mock_response
+
+    registry._credentials.token = "token"
+    registry._credentials.refresh = MagicMock()
+
+    mcp_servers = registry.search_mcp_servers(
+        search_string="test-mcp",
+        search_type="KEYWORD",
+        filter_str="display_name:test",
+        order_by="name",
+        page_size=10,
+        page_token="next-token",
+    )
+    assert mcp_servers == {"mcpServers": [{"name": "mcp-1"}]}
+    registry._session.post.assert_called_once_with(
+        f"{registry._base_url}/projects/test-project/locations/global/mcpServers:search",
+        headers={"x-goog-user-project": "test-project"},
+        json={
+            "searchString": "test-mcp",
+            "searchType": "KEYWORD",
+            "filter": "display_name:test",
+            "orderBy": "name",
+            "pageSize": 10,
+            "pageToken": "next-token",
+        },
+    )
+    # pylint: enable=protected-access
+
   def test_get_mcp_server(self, registry):
     mock_response = MagicMock()
     mock_response.json.return_value = {"name": "test-mcp"}
@@ -606,8 +674,8 @@ class TestAgentRegistry:
 
   def test_make_request_raises_http_status_error(self, registry):
     mock_response = MagicMock()
-    mock_response.status_code = 404
-    mock_response.text = "Not Found"
+    mock_response.status_code = 500
+    mock_response.text = "Internal Server Error"
     error = requests.exceptions.HTTPError(
         "Error", request=MagicMock(), response=mock_response
     )
@@ -617,7 +685,7 @@ class TestAgentRegistry:
     registry._credentials.refresh = MagicMock()
 
     with pytest.raises(
-        RuntimeError, match="API request failed with status 404"
+        RuntimeError, match="API request failed with status 500"
     ):
       registry._make_request("test-path")
 
