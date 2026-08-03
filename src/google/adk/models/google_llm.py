@@ -41,6 +41,8 @@ from ..utils._google_client_headers import merge_tracking_headers
 from ..utils.context_utils import Aclosing
 from ..utils.streaming_utils import StreamingResponseAggregator
 from ..utils.variant_utils import GoogleLLMVariant
+from ._capabilities import gemini_output_schema_and_tools
+from ._capabilities import LlmCapabilities
 from .base_llm import BaseLlm
 from .base_llm_connection import BaseLlmConnection
 from .gemini_llm_connection import GeminiLlmConnection
@@ -211,7 +213,7 @@ class Gemini(BaseLlm):
     # Handle context caching if configured
     cache_metadata = None
     cache_manager = None
-    if llm_request.cache_config:
+    if llm_request.cache_config and not self.use_interactions_api:
       from ..telemetry.tracing import tracer
       from .gemini_context_cache_manager import GeminiContextCacheManager
 
@@ -344,6 +346,16 @@ class Gemini(BaseLlm):
     ):
       yield llm_response
 
+  @property
+  @override
+  def capabilities(self) -> LlmCapabilities:
+    # Declared here rather than inherited from BaseLlm: the base implementation
+    # is a deprecated fallback that warns and will be removed, whereas this is
+    # Gemini's permanent self-report.
+    return LlmCapabilities(
+        output_schema_and_tools=gemini_output_schema_and_tools(self.model),
+    )
+
   @cached_property
   def api_client(self) -> Client:
     """Provides the api client.
@@ -368,8 +380,9 @@ class Gemini(BaseLlm):
     if self.model.startswith('projects/'):
       kwargs['enterprise'] = True
 
-    if self.client_kwargs:
-      kwargs.update(self.client_kwargs)
+    client_kwargs = getattr(self, 'client_kwargs', None)
+    if client_kwargs:
+      kwargs.update(client_kwargs)
 
     return Client(**kwargs)
 
@@ -416,8 +429,9 @@ class Gemini(BaseLlm):
     if self.model.startswith('projects/'):
       kwargs['enterprise'] = True
 
-    if self.client_kwargs:
-      kwargs.update(self.client_kwargs)
+    client_kwargs = getattr(self, 'client_kwargs', None)
+    if client_kwargs:
+      kwargs.update(client_kwargs)
 
     return Client(**kwargs)
 

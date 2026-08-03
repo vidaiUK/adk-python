@@ -242,6 +242,20 @@ def test_gemini_repr_excludes_client_kwargs():
   assert "client_kwargs" not in repr_str
 
 
+def test_gemini_api_client_when_client_kwargs_missing_from_dict():
+  model = Gemini(model="gemini-2.5-flash")
+  model.__dict__.pop("client_kwargs", None)
+  assert "client_kwargs" not in model.__dict__
+
+  with mock.patch("google.genai.Client", autospec=True) as mock_client:
+    _ = model.api_client
+    mock_client.assert_called_once()
+
+  with mock.patch("google.genai.Client", autospec=True) as mock_client:
+    _ = model._live_api_client
+    mock_client.assert_called_once()
+
+
 def test_client_version_header():
   model = Gemini(model="gemini-2.5-flash")
   client = model.api_client
@@ -559,25 +573,32 @@ async def test_generate_content_async_other_client_error(
 
 @pytest.mark.asyncio
 async def test_connect(gemini_llm, llm_request):
-  # Create a mock connection
-  mock_connection = mock.MagicMock(spec=GeminiLlmConnection)
+  """Test that connect yields a GeminiLlmConnection wrapping the live session."""
+  mock_live_session = mock.AsyncMock()
 
-  # Create a mock context manager
-  class MockContextManager:
+  # Patch the live API client boundary so the real connect() body runs.
+  with mock.patch.object(gemini_llm, "_live_api_client") as mock_live_client:
 
-    async def __aenter__(self):
-      return mock_connection
+    class MockLiveConnect:
 
-    async def __aexit__(self, *args):
-      pass
+      async def __aenter__(self):
+        return mock_live_session
 
-  # Mock the connect method at the class level
-  with mock.patch(
-      "google.adk.models.google_llm.Gemini.connect",
-      return_value=MockContextManager(),
-  ):
+      async def __aexit__(self, *args):
+        pass
+
+    mock_live_client.aio.live.connect.return_value = MockLiveConnect()
+
     async with gemini_llm.connect(llm_request) as connection:
-      assert connection is mock_connection
+      mock_live_client.aio.live.connect.assert_called_once()
+      call_args = mock_live_client.aio.live.connect.call_args
+      assert call_args.kwargs["model"] == llm_request.model
+      assert call_args.kwargs["config"] is llm_request.live_connect_config
+
+      assert isinstance(connection, GeminiLlmConnection)
+      assert connection._gemini_session is mock_live_session
+      assert connection._api_backend == gemini_llm._api_backend
+      assert connection._model_version == llm_request.model
 
 
 @pytest.mark.asyncio
@@ -2040,6 +2061,46 @@ async def test_generate_content_async_with_cache_metadata_integration(
       # Verify cache metadata is preserved
       assert second_arg.cache_name == cache_metadata.cache_name
       assert second_arg.invocations_used == cache_metadata.invocations_used
+
+
+@pytest.mark.asyncio
+async def test_interactions_api_does_not_apply_explicit_cache(llm_request):
+  """Interactions requests use implicit caching without mutating the prompt."""
+  gemini = Gemini(model="gemini-2.5-flash", use_interactions_api=True)
+  llm_request.cache_config = ContextCacheConfig()
+  original_request = llm_request.model_copy(deep=True)
+
+  async def generate_via_interactions(_llm_request, _stream):
+    yield LlmResponse(
+        content=Content(
+            role="model", parts=[Part.from_text(text="interaction response")]
+        )
+    )
+
+  with (
+      mock.patch.object(gemini, "_preprocess_request", new=AsyncMock()),
+      mock.patch.object(
+          gemini,
+          "_generate_content_via_interactions",
+          new=generate_via_interactions,
+      ),
+      mock.patch(
+          "google.adk.models.gemini_context_cache_manager.GeminiContextCacheManager"
+      ) as cache_manager_class,
+  ):
+    responses = [
+        response
+        async for response in gemini.generate_content_async(llm_request)
+    ]
+
+  assert responses[0].content.parts[0].text == "interaction response"
+  assert llm_request.contents == original_request.contents
+  assert (
+      llm_request.config.system_instruction
+      == original_request.config.system_instruction
+  )
+  assert llm_request.config.cached_content is None
+  cache_manager_class.assert_not_called()
 
 
 def test_build_function_declaration_log():

@@ -270,8 +270,6 @@ class TestGeminiContextCacheManager:
   async def test_create_cache_gates_on_prefix_not_full_prompt(self):
     """Cache creation is gated on the cacheable prefix, not the full prompt.
 
-    Regression test for https://github.com/google/adk-python/issues/5847.
-
     On a long conversation the previous-prompt token count
     (``cacheable_contents_token_count``) can be well above Gemini's 4096-token
     minimum while the cached prefix ``contents[:cache_contents_count]`` is far
@@ -303,6 +301,109 @@ class TestGeminiContextCacheManager:
 
     assert result is None
     self.manager.genai_client.aio.caches.create.assert_not_called()
+
+  async def test_completed_turn_grows_cacheable_prefix(self):
+    """A completed turn becomes part of the next explicit cache."""
+    first_user = types.Content(
+        role="user", parts=[types.Part(text="First question")]
+    )
+    first_model = types.Content(
+        role="model", parts=[types.Part(text="First answer")]
+    )
+    next_user = types.Content(
+        role="user", parts=[types.Part(text="Next question")]
+    )
+    first_request = self.create_llm_request(contents_count=0)
+    first_request.contents = [first_user]
+
+    first_metadata = await self.manager.handle_context_caching(first_request)
+
+    assert first_metadata is not None
+    assert first_metadata.contents_count == 0
+
+    next_request = self.create_llm_request(
+        cache_metadata=first_metadata, contents_count=0
+    )
+    next_request.contents = [first_user, first_model, next_user]
+    next_request.cacheable_contents_token_count = 30_000
+    cached_content = AsyncMock()
+    cached_content.name = "cachedContents/grown-prefix"
+    self.manager.genai_client.aio.caches.create = AsyncMock(
+        return_value=cached_content
+    )
+
+    next_metadata = await self.manager.handle_context_caching(next_request)
+
+    assert next_metadata is not None
+    assert next_metadata.cache_name == "cachedContents/grown-prefix"
+    assert next_metadata.contents_count == 2
+    create_config = (
+        self.manager.genai_client.aio.caches.create.call_args.kwargs["config"]
+    )
+    assert create_config.contents == [first_user, first_model]
+    assert next_request.contents == [next_user]
+
+  async def test_gemini_25_creates_cache_above_2048_token_minimum(self):
+    """Gemini 2.5 creates an explicit cache above its 2,048-token floor."""
+    llm_request = self.create_llm_request(contents_count=0)
+    llm_request.config.system_instruction = "x" * 12_000
+    llm_request.cacheable_contents_token_count = 3_000
+    llm_request.cache_metadata = CacheMetadata(
+        fingerprint=self.manager._generate_cache_fingerprint(llm_request, 0),
+        contents_count=0,
+    )
+    cached_content = AsyncMock()
+    cached_content.name = "cachedContents/gemini-25"
+    self.manager.genai_client.aio.caches.create = AsyncMock(
+        return_value=cached_content
+    )
+
+    result = await self.manager.handle_context_caching(llm_request)
+
+    assert result is not None
+    assert result.cache_name == "cachedContents/gemini-25"
+    self.manager.genai_client.aio.caches.create.assert_awaited_once()
+
+  async def test_gemini_3_skips_cache_below_4096_token_minimum(self):
+    """Gemini 3 skips an explicit cache below its 4,096-token floor."""
+    llm_request = self.create_llm_request(contents_count=0)
+    llm_request.model = "gemini-3.1-pro-preview"
+    llm_request.config.system_instruction = "x" * 12_000
+    llm_request.cacheable_contents_token_count = 3_000
+    llm_request.cache_metadata = CacheMetadata(
+        fingerprint=self.manager._generate_cache_fingerprint(llm_request, 0),
+        contents_count=0,
+    )
+
+    result = await self.manager.handle_context_caching(llm_request)
+
+    assert result is not None
+    assert result.cache_name is None
+    self.manager.genai_client.aio.caches.create.assert_not_called()
+
+  async def test_opaque_model_does_not_apply_guessed_token_minimum(self):
+    """Opaque tuned-model IDs let the server enforce the cache floor."""
+    llm_request = self.create_llm_request(contents_count=0)
+    llm_request.model = (
+        "projects/test/locations/us-central1/endpoints/tuned-model"
+    )
+    llm_request.config.system_instruction = "x" * 12_000
+    llm_request.cacheable_contents_token_count = 3_000
+    llm_request.cache_metadata = CacheMetadata(
+        fingerprint=self.manager._generate_cache_fingerprint(llm_request, 0),
+        contents_count=0,
+    )
+    cached_content = AsyncMock()
+    cached_content.name = "cachedContents/tuned-model"
+    self.manager.genai_client.aio.caches.create = AsyncMock(
+        return_value=cached_content
+    )
+
+    result = await self.manager.handle_context_caching(llm_request)
+
+    assert result is not None
+    assert result.cache_name == "cachedContents/tuned-model"
+    self.manager.genai_client.aio.caches.create.assert_awaited_once()
 
   async def test_handle_context_caching_invalid_cache_fingerprint_mismatch(
       self,
@@ -548,6 +649,104 @@ class TestGeminiContextCacheManager:
     )
 
     assert fingerprint_auto != fingerprint_none
+
+  def test_generate_cache_fingerprint_tool_order_independent(self):
+    """Reordered tools and function declarations hash identically."""
+    decl_alpha = types.FunctionDeclaration(name="alpha", description="a")
+    decl_beta = types.FunctionDeclaration(name="beta", description="b")
+    content = types.Content(role="user", parts=[types.Part(text="Test")])
+    cache_contents_count = 1
+
+    # Two tools (one declaration each) in opposite order.
+    request_ab = LlmRequest(
+        model="gemini-2.5-flash",
+        contents=[content],
+        config=types.GenerateContentConfig(
+            system_instruction="Test instruction",
+            tools=[
+                types.Tool(function_declarations=[decl_alpha]),
+                types.Tool(function_declarations=[decl_beta]),
+            ],
+        ),
+        cache_config=self.cache_config,
+    )
+    request_ba = LlmRequest(
+        model="gemini-2.5-flash",
+        contents=[content],
+        config=types.GenerateContentConfig(
+            system_instruction="Test instruction",
+            tools=[
+                types.Tool(function_declarations=[decl_beta]),
+                types.Tool(function_declarations=[decl_alpha]),
+            ],
+        ),
+        cache_config=self.cache_config,
+    )
+    assert self.manager._generate_cache_fingerprint(
+        request_ab, cache_contents_count
+    ) == self.manager._generate_cache_fingerprint(
+        request_ba, cache_contents_count
+    )
+
+    # One tool with two declarations in opposite order.
+    request_decls_ab = LlmRequest(
+        model="gemini-2.5-flash",
+        contents=[content],
+        config=types.GenerateContentConfig(
+            system_instruction="Test instruction",
+            tools=[types.Tool(function_declarations=[decl_alpha, decl_beta])],
+        ),
+        cache_config=self.cache_config,
+    )
+    request_decls_ba = LlmRequest(
+        model="gemini-2.5-flash",
+        contents=[content],
+        config=types.GenerateContentConfig(
+            system_instruction="Test instruction",
+            tools=[types.Tool(function_declarations=[decl_beta, decl_alpha])],
+        ),
+        cache_config=self.cache_config,
+    )
+    assert self.manager._generate_cache_fingerprint(
+        request_decls_ab, cache_contents_count
+    ) == self.manager._generate_cache_fingerprint(
+        request_decls_ba, cache_contents_count
+    )
+
+  def test_generate_cache_fingerprint_trailing_content_ignored(self):
+    """Appending a trailing content leaves a fixed-prefix fingerprint stable."""
+    llm_request = self.create_llm_request(contents_count=3)
+    prefix_count = 2
+
+    fingerprint_before = self.manager._generate_cache_fingerprint(
+        llm_request, prefix_count
+    )
+
+    # A new turn arrives; the cached prefix is unchanged.
+    llm_request.contents.append(
+        types.Content(role="user", parts=[types.Part(text="A new turn")])
+    )
+    fingerprint_after = self.manager._generate_cache_fingerprint(
+        llm_request, prefix_count
+    )
+
+    assert fingerprint_before == fingerprint_after
+
+  def test_generate_cache_fingerprint_system_instruction_change(self):
+    """Changing system_instruction changes the fingerprint."""
+    llm_request = self.create_llm_request()
+    cache_contents_count = 2
+
+    fingerprint_original = self.manager._generate_cache_fingerprint(
+        llm_request, cache_contents_count
+    )
+
+    llm_request.config.system_instruction = "A different instruction"
+    fingerprint_changed = self.manager._generate_cache_fingerprint(
+        llm_request, cache_contents_count
+    )
+
+    assert fingerprint_original != fingerprint_changed
 
   async def test_populate_cache_metadata_in_response_no_invocations_increment(
       self,
@@ -1155,9 +1354,12 @@ class TestGeminiContextCacheManager:
     assert result_2.cache_name == (
         "projects/test/locations/us-central1/cachedContents/new789"
     )
-    assert result_2.contents_count == 0
+    assert result_2.contents_count == 2
     assert result_2.invocations_used == 1
-    self.manager.genai_client.aio.caches.create.assert_called_once()
+    create_config = (
+        self.manager.genai_client.aio.caches.create.call_args.kwargs["config"]
+    )
+    assert create_config.contents == [user_msg, model_tool_call]
 
   async def test_create_cache_uses_server_expire_time(self):
     """The server-reported expiry is authoritative when it is available."""
