@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from contextlib import AbstractAsyncContextManager
 import os
 from typing import AsyncGenerator
 from typing import Optional
@@ -285,7 +286,9 @@ class BaseLlm(BaseModel):
           )
       )
 
-  def connect(self, llm_request: LlmRequest) -> BaseLlmConnection:
+  def connect(
+      self, llm_request: LlmRequest
+  ) -> AbstractAsyncContextManager[BaseLlmConnection]:
     """Creates a live connection to the LLM.
 
     Args:

@@ -148,7 +148,7 @@ class LlmRequest(BaseModel):
 
       # Process all parts, creating references for non-text parts
       non_text_count = 0
-      for part in instructions.parts:
+      for part in instructions.parts or []:
         if part.text:
           # Text part - add to system instruction
           text_parts.append(part.text)
@@ -273,6 +273,14 @@ class LlmRequest(BaseModel):
       declaration = tool._get_declaration()
       if declaration:
         declarations.append(declaration)
+        if tool.name in self.tools_dict:
+          # Both declarations are still advertised to the model, but only one
+          # tool can hold the name, so calls land on the survivor.
+          logging.warning(
+              "Duplicate tool name %r: the previously registered tool is"
+              " shadowed and can no longer be called.",
+              tool.name,
+          )
         self.tools_dict[tool.name] = tool
     if declarations:
       if self.config.tools is None:
@@ -290,6 +298,32 @@ class LlmRequest(BaseModel):
       else:
         # No existing tool with function_declarations, create new one
         self.config.tools.append(types.Tool(function_declarations=declarations))
+
+  def _insert_transient_user_content(
+      self, contents: list[types.Content]
+  ) -> None:
+    """Insert request-scoped user context at the current-turn boundary.
+
+    Transient retrieval or dynamic instruction content belongs before the
+    latest ordinary user batch, but after a function response when the model
+    is continuing a tool-call turn. Keeping it at this boundary prevents the
+    request-scoped content from entering a reusable system/history prefix.
+    """
+    if not contents:
+      return
+
+    insert_index = len(self.contents)
+    for i in range(len(self.contents) - 1, -1, -1):
+      content = self.contents[i]
+      if content.role != "user":
+        insert_index = i + 1
+        break
+      if any(part.function_response for part in content.parts or []):
+        insert_index = i + 1
+        break
+      insert_index = i
+
+    self.contents[insert_index:insert_index] = contents
 
   def set_output_schema(
       self,

@@ -28,6 +28,7 @@ from typing import cast
 from typing import Iterator
 from typing import Optional
 
+from ...errors._stale_session_error import StaleSessionError
 from ...errors.already_exists_error import AlreadyExistsError
 from ...errors.session_not_found_error import SessionNotFoundError
 from ...events.event import Event
@@ -435,6 +436,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
           )
       )
 
+    sessions.sort(key=lambda s: (s.last_update_time, s.user_id, s.id))
     return ListSessionsResponse(sessions=sessions)
 
   async def delete_session(
@@ -526,7 +528,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
         if session._storage_update_marker is not None:
           if session._storage_update_marker != str(current_revision):
-            raise ValueError(_STALE_SESSION_ERROR_MESSAGE)
+            raise StaleSessionError(_STALE_SESSION_ERROR_MESSAGE)
 
         app_snap = (
             await app_ref.get(transaction=transaction) if app_updates else None
