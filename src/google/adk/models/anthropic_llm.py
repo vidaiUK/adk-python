@@ -47,6 +47,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
 from typing_extensions import override
+from typing_extensions import Self
 
 from ..utils._google_client_headers import get_tracking_headers
 from .base_llm import BaseLlm
@@ -740,19 +741,26 @@ class AnthropicLlm(BaseLlm):
   model: str = "claude-sonnet-4-20250514"
   max_tokens: int = 8192
 
-  base_url: Optional[str] = Field(
-      default_factory=lambda: (
+  # --- fork: base_url is inherited from BaseLlm (declared there as
+  # `base_url: Optional[str] = None`); we only override the env-var
+  # resolution chain for Anthropic-specific vars. Keeping the field
+  # declaration in BaseLlm means we don't add lines to this class that
+  # upstream might touch next to.
+  #
+  # Resolution order when unset explicitly:
+  #   ANTHROPIC_BASE_URL > ADK_LLM_BASE_URL > None.
+  # The Anthropic SDK also reads ANTHROPIC_BASE_URL natively; we surface
+  # it on the Pydantic model so the effective value is introspectable
+  # and testable.
+  @model_validator(mode="after")
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = (
           os.environ.get("ANTHROPIC_BASE_URL")
           or os.environ.get("ADK_LLM_BASE_URL")
       )
-  )
-  """The base URL for the Anthropic API endpoint.
-
-  Resolution order when unset explicitly:
-  ANTHROPIC_BASE_URL > ADK_LLM_BASE_URL > None. The Anthropic SDK also reads
-  ANTHROPIC_BASE_URL natively; we surface it on the Pydantic model so the
-  effective value is introspectable and testable.
-  """
+    return self
+  # --- end fork
 
   @classmethod
   @override

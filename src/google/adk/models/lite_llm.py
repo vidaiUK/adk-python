@@ -52,10 +52,12 @@ if not TYPE_CHECKING and importlib.util.find_spec("litellm") is None:
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 from pydantic import PrivateAttr
 from typing_extensions import NotRequired
 from typing_extensions import override
 from typing_extensions import Required
+from typing_extensions import Self
 
 from ..utils._google_client_headers import merge_tracking_headers
 from ._capabilities import LlmCapabilities
@@ -2880,25 +2882,31 @@ class LiteLlm(BaseLlm):
     llm_client: The LLM client to use for the model.
   """
 
-  base_url: Optional[str] = Field(
-      default_factory=lambda: _resolve_litellm_base_url()
-  )
-  """The base URL for the LiteLLM API endpoint.
-
-  Resolution order when unset explicitly:
-  LITELLM_API_BASE > OPENAI_API_BASE > OPENAI_BASE_URL > ADK_LLM_BASE_URL.
-
-  The first three are honored verbatim because LiteLLM's OpenAI-compatible
-  providers read them natively; users setting them are assumed to already
-  include any required path (e.g. ``/v1``).
-
-  ADK_LLM_BASE_URL is a framework-wide root for multi-provider proxies
-  (e.g. Vidai, Helicone, Portkey). Since LiteLLM's OpenAI-compatible
-  transport requires a ``/v1`` suffix, ``/v1`` is appended automatically
-  when the value is inherited from ADK_LLM_BASE_URL and does not already
-  contain a version path. Gemini and Anthropic SDKs use the same root
-  unchanged because their clients append their own versioned paths.
-  """
+  # --- fork: base_url is inherited from BaseLlm (declared there as
+  # `base_url: Optional[str] = None`); we only override the env-var
+  # resolution chain here for LiteLLM-specific vars. Keeping the field
+  # declaration in BaseLlm means we don't add lines to this class that
+  # upstream might touch next to.
+  #
+  # Resolution order when unset explicitly:
+  #   LITELLM_API_BASE > OPENAI_API_BASE > OPENAI_BASE_URL > ADK_LLM_BASE_URL.
+  #
+  # The first three are honored verbatim because LiteLLM's OpenAI-compatible
+  # providers read them natively; users setting them are assumed to already
+  # include any required path (e.g. ``/v1``).
+  #
+  # ADK_LLM_BASE_URL is a framework-wide root for multi-provider proxies
+  # (e.g. Vidai, Helicone, Portkey). Since LiteLLM's OpenAI-compatible
+  # transport requires a ``/v1`` suffix, ``/v1`` is appended automatically
+  # when the value is inherited from ADK_LLM_BASE_URL and does not already
+  # contain a version path. Gemini and Anthropic SDKs use the same root
+  # unchanged because their clients append their own versioned paths.
+  @model_validator(mode="after")
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = _resolve_litellm_base_url()
+    return self
+  # --- end fork
 
   # LiteLLMClient has no JSON serializer, so it is excluded from dumps to keep
   # model_dump(mode="json") from raising.

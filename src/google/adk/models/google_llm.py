@@ -35,7 +35,9 @@ from urllib.parse import urlunparse
 from google.genai import types
 from google.genai.errors import ClientError
 from pydantic import Field
+from pydantic import model_validator
 from typing_extensions import override
+from typing_extensions import Self
 
 from ..utils._google_client_headers import get_tracking_headers
 from ..utils._google_client_headers import merge_tracking_headers
@@ -125,18 +127,26 @@ class Gemini(BaseLlm):
   )
   """Extra arguments to pass to the google.genai.Client constructor."""
 
-  base_url: Optional[str] = Field(
-      default_factory=lambda: (
+  base_url: Optional[str] = None
+  """The base URL for the AI platform service endpoint."""
+
+  # --- fork: env-var resolution for base_url (do NOT touch upstream's line
+  # above — it is character-for-character identical to upstream so future
+  # upstream edits to it don't conflict with us).
+  #
+  # Resolution order when unset explicitly:
+  #   ADK_GEMINI_BASE_URL > ADK_VERTEX_BASE_URL > ADK_LLM_BASE_URL > None.
+  # An explicit `base_url=` passed to the constructor always wins over env vars.
+  @model_validator(mode='after')
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = (
           os.environ.get('ADK_GEMINI_BASE_URL')
           or os.environ.get('ADK_VERTEX_BASE_URL')
           or os.environ.get('ADK_LLM_BASE_URL')
       )
-  )
-  """The base URL for the Gemini or Vertex AI API endpoint.
-
-  Resolution order when unset explicitly:
-  ADK_GEMINI_BASE_URL > ADK_VERTEX_BASE_URL > ADK_LLM_BASE_URL > None.
-  """
+    return self
+  # --- end fork
 
   speech_config: Optional[types.SpeechConfig] = None
 
