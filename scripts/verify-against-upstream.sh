@@ -98,15 +98,16 @@ if [ "$MODE" = "pr" ]; then
     LABELS+=("PR #$COUNT")
   fi
 else
-  # --recent N: last N commits on upstream/main, oldest-first
+  # --recent N: last N commits on upstream/main, oldest-first.
+  # (BSD `tail -r` reverses; `tac` isn't on macOS by default.)
   while IFS= read -r sha; do
     TARGETS+=("$sha")
     LABELS+=("upstream $(git log -1 --format='%h %s' "$sha" | head -c 70)")
-  done < <(git log --format=%H -n "$COUNT" upstream/main | tac)
+  done < <(git log --format=%H -n "$COUNT" upstream/main | tail -r 2>/dev/null || git log --format=%H -n "$COUNT" upstream/main | awk '{a[NR]=$0} END {for(i=NR;i>0;i--) print a[i]}')
 fi
 
 # ---- run each test in a fresh branch -------------------------------------
-declare -a RESULTS   # each entry: "PASS|CONFLICT|TESTFAIL <label>"
+RESULTS=()   # each entry: "PASS|CONFLICT|TESTFAIL <label>"
 FAILURES=0
 
 cleanup_branch() {
@@ -184,7 +185,7 @@ echo
 echo "======================================================================"
 echo ">> SUMMARY (fork HEAD $BASE_SHORT vs ${#TARGETS[@]} target(s))"
 echo "======================================================================"
-for r in "${RESULTS[@]}"; do
+for r in ${RESULTS[@]+"${RESULTS[@]}"}; do
   STATUS="${r%%|*}"
   LABEL="${r#*|}"
   case "$STATUS" in
