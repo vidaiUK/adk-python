@@ -129,7 +129,9 @@ for i in "${!TARGETS[@]}"; do
   echo ">> [$((i+1))/${#TARGETS[@]}] $LABEL"
   echo "======================================================================"
 
-  # Fresh branch off our current fork HEAD.
+  # Fresh branch off our current fork HEAD. Must switch off verify-tmp
+  # before we can delete it.
+  git checkout "$BASE_SHA" --quiet 2>/dev/null || true
   git branch -D verify-tmp --quiet 2>/dev/null || true
   git checkout -b verify-tmp "$BASE_SHA" --quiet
 
