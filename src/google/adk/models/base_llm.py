@@ -60,18 +60,6 @@ class BaseLlm(BaseModel):
   provider-specific resolution chain.
   """
 
-  # --- fork: env-var resolution for base_url. Subclasses (Gemini, Anthropic,
-  # LiteLlm) override this validator with a provider-specific chain that
-  # falls back to ADK_LLM_BASE_URL. Keeping the field declaration on the
-  # line above as a simple `= None` means upstream can never conflict with
-  # us if they later add fields adjacent to it.
-  @model_validator(mode='after')
-  def _fork_apply_base_url_env_fallback(self) -> Self:
-    if self.base_url is None:
-      self.base_url = os.environ.get('ADK_LLM_BASE_URL')
-    return self
-  # --- end fork
-
   @property
   def capabilities(self) -> LlmCapabilities:
     """The capabilities of this model instance.
@@ -314,3 +302,15 @@ class BaseLlm(BaseModel):
     raise NotImplementedError(
         f'Live connection is not supported for {self.model}.'
     )
+
+  # --- fork: env-var resolution for base_url. Deliberately placed at the
+  # bottom of the class (after all methods, far from Pydantic field
+  # declarations) so upstream is unlikely to add anything adjacent.
+  # Subclasses (Gemini, Anthropic, LiteLlm) override with a
+  # provider-specific chain that falls back to ADK_LLM_BASE_URL.
+  @model_validator(mode='after')
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = os.environ.get('ADK_LLM_BASE_URL')
+    return self
+  # --- end fork

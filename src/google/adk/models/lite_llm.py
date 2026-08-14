@@ -2956,32 +2956,6 @@ class LiteLlm(BaseLlm):
     llm_client: The LLM client to use for the model.
   """
 
-  # --- fork: base_url is inherited from BaseLlm (declared there as
-  # `base_url: Optional[str] = None`); we only override the env-var
-  # resolution chain here for LiteLLM-specific vars. Keeping the field
-  # declaration in BaseLlm means we don't add lines to this class that
-  # upstream might touch next to.
-  #
-  # Resolution order when unset explicitly:
-  #   LITELLM_API_BASE > OPENAI_API_BASE > OPENAI_BASE_URL > ADK_LLM_BASE_URL.
-  #
-  # The first three are honored verbatim because LiteLLM's OpenAI-compatible
-  # providers read them natively; users setting them are assumed to already
-  # include any required path (e.g. ``/v1``).
-  #
-  # ADK_LLM_BASE_URL is a framework-wide root for multi-provider proxies
-  # (e.g. Vidai, Helicone, Portkey). Since LiteLLM's OpenAI-compatible
-  # transport requires a ``/v1`` suffix, ``/v1`` is appended automatically
-  # when the value is inherited from ADK_LLM_BASE_URL and does not already
-  # contain a version path. Gemini and Anthropic SDKs use the same root
-  # unchanged because their clients append their own versioned paths.
-  @model_validator(mode="after")
-  def _fork_apply_base_url_env_fallback(self) -> Self:
-    if self.base_url is None:
-      self.base_url = _resolve_litellm_base_url()
-    return self
-  # --- end fork
-
   # LiteLLMClient has no JSON serializer, so it is excluded from dumps to keep
   # model_dump(mode="json") from raising.
   llm_client: LiteLLMClient = Field(default_factory=LiteLLMClient, exclude=True)
@@ -3389,3 +3363,18 @@ class LiteLlm(BaseLlm):
         # For AI21 models (e.g., "ai21/jamba-1.5-large")
         r"ai21/.*",
     ]
+
+  # --- fork: env-var resolution for base_url. Deliberately placed at the
+  # bottom of the class (after all methods) so upstream is unlikely to add
+  # anything adjacent. The base_url field itself is inherited from BaseLlm.
+  # Resolution order when unset:
+  #   LITELLM_API_BASE > OPENAI_API_BASE > OPENAI_BASE_URL > ADK_LLM_BASE_URL.
+  # The first three are LiteLLM/OpenAI SDK-native vars (used verbatim);
+  # ADK_LLM_BASE_URL gets '/v1' appended if it lacks a version path
+  # (see _resolve_litellm_base_url for the transport-required suffix logic).
+  @model_validator(mode="after")
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = _resolve_litellm_base_url()
+    return self
+  # --- end fork

@@ -812,27 +812,6 @@ class AnthropicLlm(BaseLlm):
   model: str = "claude-sonnet-4-20250514"
   max_tokens: int = 8192
 
-  # --- fork: base_url is inherited from BaseLlm (declared there as
-  # `base_url: Optional[str] = None`); we only override the env-var
-  # resolution chain for Anthropic-specific vars. Keeping the field
-  # declaration in BaseLlm means we don't add lines to this class that
-  # upstream might touch next to.
-  #
-  # Resolution order when unset explicitly:
-  #   ANTHROPIC_BASE_URL > ADK_LLM_BASE_URL > None.
-  # The Anthropic SDK also reads ANTHROPIC_BASE_URL natively; we surface
-  # it on the Pydantic model so the effective value is introspectable
-  # and testable.
-  @model_validator(mode="after")
-  def _fork_apply_base_url_env_fallback(self) -> Self:
-    if self.base_url is None:
-      self.base_url = (
-          os.environ.get("ANTHROPIC_BASE_URL")
-          or os.environ.get("ADK_LLM_BASE_URL")
-      )
-    return self
-  # --- end fork
-
   @classmethod
   @override
   def supported_models(cls) -> list[str]:
@@ -1168,6 +1147,23 @@ class AnthropicLlm(BaseLlm):
           " any other credential the Anthropic SDK can discover."
       )
     return client
+
+  # --- fork: env-var resolution for base_url. Deliberately placed at the
+  # bottom of the class (after all methods) so upstream is unlikely to add
+  # anything adjacent. The base_url field itself is inherited from BaseLlm.
+  # Resolution order when unset:
+  #   ANTHROPIC_BASE_URL > ADK_LLM_BASE_URL > None.
+  # The Anthropic SDK also reads ANTHROPIC_BASE_URL natively; we surface it
+  # on the Pydantic model so the effective value is introspectable/testable.
+  @model_validator(mode="after")
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = (
+          os.environ.get("ANTHROPIC_BASE_URL")
+          or os.environ.get("ADK_LLM_BASE_URL")
+      )
+    return self
+  # --- end fork
 
 
 class Claude(AnthropicLlm):
