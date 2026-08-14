@@ -61,6 +61,7 @@ logger = logging.getLogger('google_adk.' + __name__)
 _NEW_LINE = '\n'
 _EXCLUDED_PART_FIELD = {'inline_data': {'data'}}
 _GOOGLE_API_VERSION_SUFFIX_PATTERN = re.compile(r'/?(v[0-9][a-z0-9.-]*)/?')
+_API_VERSION_ENV_VARIABLE_NAME = 'GOOGLE_GENAI_API_VERSION'
 
 
 _RESOURCE_EXHAUSTED_POSSIBLE_FIX_MESSAGE = """
@@ -130,23 +131,26 @@ class Gemini(BaseLlm):
   base_url: Optional[str] = None
   """The base URL for the AI platform service endpoint."""
 
-  # --- fork: env-var resolution for base_url (do NOT touch upstream's line
-  # above — it is character-for-character identical to upstream so future
-  # upstream edits to it don't conflict with us).
-  #
-  # Resolution order when unset explicitly:
-  #   ADK_GEMINI_BASE_URL > ADK_VERTEX_BASE_URL > ADK_LLM_BASE_URL > None.
-  # An explicit `base_url=` passed to the constructor always wins over env vars.
-  @model_validator(mode='after')
-  def _fork_apply_base_url_env_fallback(self) -> Self:
-    if self.base_url is None:
-      self.base_url = (
-          os.environ.get('ADK_GEMINI_BASE_URL')
-          or os.environ.get('ADK_VERTEX_BASE_URL')
-          or os.environ.get('ADK_LLM_BASE_URL')
-      )
-    return self
-  # --- end fork
+  api_version: Optional[str] = None
+  """The API version to use for the AI platform service endpoint.
+
+  For the Vertex AI backend the google-genai SDK defaults to ``v1beta1``, which
+  exposes the latest preview features. Production deployments that require a
+  stable, SLA-eligible endpoint can set this to ``v1`` to use the GA Vertex AI
+  API. When unset, the ``GOOGLE_GENAI_API_VERSION`` environment variable is
+  consulted, and finally the SDK's own default is used so existing behavior is
+  unchanged.
+
+  An API version embedded in the ``base_url`` path (e.g. a trailing ``/v1``)
+  takes precedence over this field.
+
+  Sample:
+  ```python
+  from google.adk.models import Gemini
+
+  agent = Agent(model=Gemini(model="gemini-2.5-pro", api_version="v1"))
+  ```
+  """
 
   speech_config: Optional[types.SpeechConfig] = None
 
@@ -258,7 +262,9 @@ class Gemini(BaseLlm):
           llm_request.config.http_options.headers or {}
       )
       _, api_version = self._base_url_and_api_version
-      if api_version:
+      if api_version is None:
+        api_version = self.api_version
+      if api_version and not llm_request.config.http_options.api_version:
         llm_request.config.http_options.api_version = api_version
 
     try:
@@ -380,6 +386,8 @@ class Gemini(BaseLlm):
     from google.genai import Client
 
     base_url, api_version = self._base_url_and_api_version
+    if api_version is None:
+      api_version = self._configured_api_version()
     kwargs_for_http_options: dict[str, Any] = {
         'headers': self._tracking_headers(),
         'retry_options': self.retry_options,
@@ -410,6 +418,21 @@ class Gemini(BaseLlm):
 
   def _tracking_headers(self) -> dict[str, str]:
     return get_tracking_headers()
+
+  def _configured_api_version(self) -> Optional[str]:
+    """Returns the explicitly configured API version, if any.
+
+    Resolution order:
+      1. The ``api_version`` field set on this instance.
+      2. The ``GOOGLE_GENAI_API_VERSION`` environment variable.
+
+    Returns ``None`` when neither is set, in which case the google-genai SDK's
+    own default (``v1beta1`` for Vertex AI) applies, preserving existing
+    behavior.
+    """
+    if self.api_version:
+      return self.api_version
+    return os.environ.get(_API_VERSION_ENV_VARIABLE_NAME) or None
 
   @cached_property
   def _base_url_and_api_version(self) -> tuple[Optional[str], Optional[str]]:
@@ -624,6 +647,26 @@ class Gemini(BaseLlm):
   def _merge_tracking_headers(self, headers: dict[str, str]) -> dict[str, str]:
     """Merge tracking headers to the given headers."""
     return merge_tracking_headers(headers)
+
+  # --- fork: env-var resolution for base_url. Deliberately placed at the
+  # bottom of the class (after all methods, far from Pydantic field
+  # declarations) so upstream is unlikely to add anything adjacent. If they
+  # ever do, the previous locations (right after the field) proved
+  # conflict-prone; keep this at the class bottom.
+  #
+  # Resolution order when unset explicitly:
+  #   ADK_GEMINI_BASE_URL > ADK_VERTEX_BASE_URL > ADK_LLM_BASE_URL > None.
+  # An explicit `base_url=` passed to the constructor always wins.
+  @model_validator(mode='after')
+  def _fork_apply_base_url_env_fallback(self) -> Self:
+    if self.base_url is None:
+      self.base_url = (
+          os.environ.get('ADK_GEMINI_BASE_URL')
+          or os.environ.get('ADK_VERTEX_BASE_URL')
+          or os.environ.get('ADK_LLM_BASE_URL')
+      )
+    return self
+  # --- end fork
 
 
 def _build_function_declaration_log(
