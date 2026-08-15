@@ -35,8 +35,9 @@ case "$SYNC_RESULT" in
     # Rationale: an inherited workflow can go active between our syncs
     # (e.g. a stray push from anywhere touched .github/workflows/**),
     # and gating re-disable on "merged" leaves those active until the
-    # next upstream change. Run it defensively.
-    sync_redisable_inherited_workflows
+    # next upstream change. Run it defensively — no polling needed since
+    # no push happened.
+    sync_redisable_inherited_workflows quick
     echo ">> Done."
     exit 0
     ;;
@@ -71,6 +72,8 @@ echo ">> Publishing new baseline..."
 sync_publish_baseline
 
 echo ">> Re-disabling inherited workflows that upstream may have re-activated..."
-sync_redisable_inherited_workflows
+echo "   (polling for up to 90s — GitHub takes seconds to register new"
+echo "    workflow files after our push before the disable API sees them)"
+sync_redisable_inherited_workflows polling
 
 echo ">> Done."

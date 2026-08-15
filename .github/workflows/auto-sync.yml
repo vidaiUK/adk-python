@@ -113,21 +113,41 @@ jobs:
           . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
           sync_publish_baseline
 
-      # Re-disable any inherited upstream workflows that may have re-activated.
-      # Runs on BOTH the merged-and-green path AND the up-to-date path so an
-      # inherited workflow that quietly re-activated between our syncs (e.g.
-      # because someone pushed to main directly, touching workflow files) still
-      # gets caught. See sync-core.sh's UNWANTED_INHERITED_WORKFLOWS list.
-      - name: Re-disable inherited workflows
-        if: >-
-          steps.merge.outputs.result == 'up-to-date' ||
-          (steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success')
+      # Re-disable inherited upstream workflows.
+      #
+      # Two separate steps because they run against different states of the
+      # GitHub side:
+      #
+      # 1. merged+green: we just pushed a modified workflow file. GitHub's
+      #    registration is ASYNC — the file arrives, then some seconds later
+      #    it appears in the workflows API, then push-event workflows fire.
+      #    Query too fast and we skip the newly-arrived workflow; it fires
+      #    on the same push a moment later. Fix: poll for up to 90s
+      #    (exit early after 2 consecutive clean polls) so we catch it
+      #    even if GitHub takes a while to reconcile. This closed the
+      #    2026-07-03 / 2026-08-14 / 2026-08-15 red-X-on-Continuous-Integration
+      #    outages.
+      #
+      # 2. up-to-date: no push happened, no race. One pass is enough — this
+      #    just defensively catches workflows that re-activated between
+      #    our syncs (someone pushed to main directly, etc.).
+      - name: Re-disable inherited workflows (post-push, polling)
+        if: steps.merge.outputs.result == 'merged' && steps.tests.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
-          sync_redisable_inherited_workflows
+          sync_redisable_inherited_workflows polling
+
+      - name: Re-disable inherited workflows (defensive, single pass)
+        if: steps.merge.outputs.result == 'up-to-date'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          . "$GITHUB_WORKSPACE/scripts/lib/sync-core.sh"
+          sync_redisable_inherited_workflows quick
 
       # --- nothing to do ---
       - name: Up to date

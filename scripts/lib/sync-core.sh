@@ -165,20 +165,73 @@ sync_protect_fork_workflows() {
   fi
 }
 
-# Disable every workflow on the repo that isn't in FORK_OWNED_WORKFLOW_BASENAMES.
+# Do one enumerate-and-disable pass. Returns via stdout: two integers
+# separated by a space — "<disabled_this_pass> <active_after>". Callers can
+# use these to decide whether to poll again.
+_sync_disable_pass_once() {
+  local basenames_joined="$1"
+  local rows
+  rows=$(gh api "repos/$REPO/actions/workflows" --paginate \
+           --jq '.workflows[] | "\(.state)\t\(.path | sub(".*/"; ""))"' 2>/dev/null || true)
+
+  if [ -z "$rows" ]; then
+    echo "0 0"
+    return 0
+  fi
+
+  local disabled=0 remaining_active=0
+  local state basename
+  while IFS=$'\t' read -r state basename; do
+    [ -z "$basename" ] && continue
+    case "|$basenames_joined|" in
+      *"|$basename|"*) continue ;;  # fork-owned, skip
+    esac
+    if [ "$state" = "active" ]; then
+      if gh api -X PUT "repos/$REPO/actions/workflows/$basename/disable" >/dev/null 2>&1; then
+        echo "  disabled: $basename" >&2
+        disabled=$((disabled + 1))
+      else
+        # Disable failed (permissions, transient, etc.) — count as still active
+        # so the poll loop tries again.
+        remaining_active=$((remaining_active + 1))
+      fi
+    fi
+  done <<< "$rows"
+
+  echo "$disabled $remaining_active"
+}
+
+# Disable every workflow on the repo that isn't in FORK_OWNED_WORKFLOWS.
 #
 # This is the "upstream CI is upstream's problem" rule expressed in code.
-# Anything active that we don't own gets disabled, regardless of whether we've
+# Anything active we don't own gets disabled, regardless of whether we've
 # seen it before. This means:
 #   * No UNWANTED list to maintain. New inherited workflows added by upstream
 #     land already-disabled after the next sync.
 #   * A workflow that re-activates due to an upstream file rewrite gets
-#     re-disabled on the next sync, not after we notice red X.
-#   * The one race we can't prevent: a workflow that fires ONCE during the
-#     transient window between our push landing and the disable step running.
-#     That single fire produces at most one red X per sync, and only for
-#     push-triggered workflows. Consumers pin @stable which is already green.
+#     re-disabled on the next sync.
+#
+# THE RACE (fixed as of commit c8595de85+... 2026-08-15):
+# When our push lands a modified workflow file, GitHub's registration of the
+# new file is ASYNC — the file arrives, then some seconds later GitHub
+# reconciles it as a workflow the API knows about, then any push triggers
+# fire. If we query the workflows API too fast, the newly-modified
+# workflow isn't in the response yet, so we skip it — then it fires
+# a moment later on the same push. That's what caused the 2026-07-03,
+# 2026-08-14, and 2026-08-15 red-X-on-Continuous-Integration outages.
+#
+# Fix: when called from the merged path (arg: "polling"), poll every 10s
+# for up to 90s, disabling anything that appears. Exit early after two
+# consecutive clean polls — no point waiting the full 90s if GitHub
+# reconciled quickly. When called from the up-to-date path (arg: "quick"
+# or unset), do one pass and return — no push happened, nothing to race.
+#
+# Usage:
+#   sync_redisable_inherited_workflows           # single pass (up-to-date path)
+#   sync_redisable_inherited_workflows polling   # poll for 90s (merged path)
 sync_redisable_inherited_workflows() {
+  local mode="${1:-quick}"
+
   # Derive the basename allowlist from FORK_OWNED_WORKFLOWS (single source
   # of truth). GitHub's actions/workflows API keys are basenames, not
   # full paths, so we strip the leading .github/workflows/ prefix.
@@ -189,38 +242,50 @@ sync_redisable_inherited_workflows() {
   done
   basenames_joined="${basenames_joined:1}"   # drop leading '|'
 
-  # Enumerate all workflows on the repo, one per line as "state<TAB>basename".
-  local rows
-  rows=$(gh api "repos/$REPO/actions/workflows" --paginate \
-           --jq '.workflows[] | "\(.state)\t\(.path | sub(".*/"; ""))"' 2>/dev/null || true)
+  echo "  fork-owned (allowlist): $(echo "$basenames_joined" | tr '|' ' ')"
 
-  if [ -z "$rows" ]; then
-    echo "  (no workflows returned by API — nothing to do)"
+  if [ "$mode" != "polling" ]; then
+    # Single pass — no push happened, no race to worry about.
+    local result disabled remaining
+    result=$(_sync_disable_pass_once "$basenames_joined")
+    disabled="${result% *}"
+    remaining="${result#* }"
+    echo "  single pass: $disabled disabled, $remaining still-active-and-failed-to-disable"
     return 0
   fi
 
-  local disabled_count=0
-  local kept_count=0
-  local state basename
-  while IFS=$'\t' read -r state basename; do
-    [ -z "$basename" ] && continue
-    # Skip anything in the fork-owned allowlist.
-    case "|$basenames_joined|" in
-      *"|$basename|"*)
-        echo "  keeping (fork-owned): $basename [state=$state]"
-        kept_count=$((kept_count + 1))
-        continue
-        ;;
-    esac
-    # For everything else: if active, disable. Otherwise leave it.
-    if [ "$state" = "active" ]; then
-      echo "  disabling inherited: $basename"
-      gh api -X PUT "repos/$REPO/actions/workflows/$basename/disable" >/dev/null
-      disabled_count=$((disabled_count + 1))
-    fi
-  done <<< "$rows"
+  # Polling mode: after a push, GitHub takes seconds to register any
+  # newly-modified workflow file. Poll every 10s up to 9 times (90s total),
+  # exiting early after 2 consecutive clean polls.
+  local attempt=0 clean_streak=0 total_disabled=0
+  local result disabled remaining
+  local max_attempts=9 sleep_secs=10
 
-  echo "  summary: $disabled_count disabled this run, $kept_count kept (fork-owned)"
+  while [ $attempt -lt $max_attempts ]; do
+    attempt=$((attempt + 1))
+    result=$(_sync_disable_pass_once "$basenames_joined")
+    disabled="${result% *}"
+    remaining="${result#* }"
+    total_disabled=$((total_disabled + disabled))
+
+    if [ "$disabled" -eq 0 ] && [ "$remaining" -eq 0 ]; then
+      clean_streak=$((clean_streak + 1))
+      echo "  poll $attempt/$max_attempts: nothing to disable (clean streak: $clean_streak)"
+      if [ $clean_streak -ge 2 ]; then
+        echo "  → 2 consecutive clean polls, GitHub has reconciled — exiting early"
+        break
+      fi
+    else
+      clean_streak=0
+      echo "  poll $attempt/$max_attempts: disabled $disabled this pass, $remaining failed"
+    fi
+
+    if [ $attempt -lt $max_attempts ]; then
+      sleep $sleep_secs
+    fi
+  done
+
+  echo "  summary: $total_disabled disabled across $attempt poll(s)"
 }
 
 # Push main and fast-forward stable. This is the "advance the baseline"
