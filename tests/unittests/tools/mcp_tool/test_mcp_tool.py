@@ -14,6 +14,7 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import create_autospec
 from unittest.mock import Mock
@@ -96,6 +97,88 @@ class TestMCPToolLegacy:
     assert declaration.name == "test_tool"
     assert declaration.description == "Test tool description"
     assert declaration.parameters is not None
+
+
+class _SnakeCaseMCPTool:
+  """Mock MCP tool shaped like SDK 2.x, which renamed the wire fields."""
+
+  def __init__(self, output_schema=None):
+    self.name = "test_tool"
+    self.description = "Test tool description"
+    self.meta = None
+    self.input_schema = {
+        "type": "object",
+        "properties": {"param1": {"type": "string"}},
+        "required": ["param1"],
+    }
+    self.output_schema = output_schema
+
+
+class TestMCPToolFieldSpellings:
+  """ADK must read MCP fields on both SDK 1.x (camelCase) and 2.x (snake)."""
+
+  def _tool(self, mcp_tool_obj):
+    return MCPTool(
+        mcp_tool=mcp_tool_obj,
+        mcp_session_manager=Mock(spec=MCPSessionManager),
+    )
+
+  def test_read_field_prefers_the_first_name_present(self):
+    model = SimpleNamespace(inputSchema={"a": 1})
+
+    assert mcp_tool._read_field(model, "inputSchema", "input_schema") == {
+        "a": 1
+    }
+
+  def test_read_field_falls_back_to_the_later_name(self):
+    model = SimpleNamespace(input_schema={"a": 1})
+
+    assert mcp_tool._read_field(model, "inputSchema", "input_schema") == {
+        "a": 1
+    }
+
+  def test_read_field_returns_falsy_values(self):
+    """An empty schema is a real value, not a missing attribute."""
+    model = SimpleNamespace(input_schema={})
+
+    assert mcp_tool._read_field(model, "inputSchema", "input_schema") == {}
+
+  def test_read_field_raises_when_no_name_matches(self):
+    with pytest.raises(AttributeError, match="defines none of"):
+      mcp_tool._read_field(SimpleNamespace(), "inputSchema", "input_schema")
+
+  def test_get_declaration_reads_snake_case_schemas(self):
+    """SDK 2.x drops the camelCase attribute, so reading it would raise."""
+    tool = self._tool(_SnakeCaseMCPTool())
+
+    with temporary_feature_override(
+        FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, True
+    ):
+      declaration = tool._get_declaration()
+
+    assert declaration.parameters_json_schema == {
+        "type": "object",
+        "properties": {"param1": {"type": "string"}},
+        "required": ["param1"],
+    }
+
+  def test_detect_error_in_response_reads_camel_case(self):
+    tool = self._tool(MockMCPTool())
+
+    assert tool._detect_error_in_response({"isError": True}) == "MCP_TOOL_ERROR"
+
+  def test_detect_error_in_response_reads_snake_case(self):
+    """SDK 2.x dumps `is_error`; reading only `isError` loses tool errors."""
+    tool = self._tool(MockMCPTool())
+
+    assert (
+        tool._detect_error_in_response({"is_error": True}) == "MCP_TOOL_ERROR"
+    )
+
+  def test_detect_error_in_response_returns_none_for_a_clean_result(self):
+    tool = self._tool(MockMCPTool())
+
+    assert tool._detect_error_in_response({"isError": False}) is None
 
 
 class TestMCPToolWithJsonSchema:
@@ -1837,3 +1920,74 @@ class TestMCPToolGracefulErrorHandling:
 
     assert result == mcp_response.model_dump(exclude_none=True, mode="json")
     self.mock_session_manager._get_session_context.assert_not_called()
+
+
+class TestResultDictKeys:
+  """Pins the literal keys of the dict `run_async` hands back to the caller.
+
+  `_run_async_impl` returns `CallToolResult.model_dump(...)` straight through,
+  so the SDK's field names are ADK's response contract. The tests elsewhere in
+  this file all compare the result against `model_dump` of the same object,
+  which holds whatever the SDK calls its fields and so cannot notice a rename.
+  These name the keys.
+  """
+
+  def setup_method(self):
+    self.mock_mcp_tool = MockMCPTool(name="test_tool")
+    self.mock_session_manager = Mock(spec=MCPSessionManager)
+    self.mock_session = AsyncMock()
+    self.mock_session_manager.create_session = AsyncMock(
+        return_value=self.mock_session
+    )
+
+  async def _run(self, mcp_response):
+    tool = MCPTool(
+        mcp_tool=self.mock_mcp_tool,
+        mcp_session_manager=self.mock_session_manager,
+    )
+    self.mock_session.call_tool = AsyncMock(return_value=mcp_response)
+    tool_context = ToolContext(invocation_context=Mock())
+    tool_context.function_call_id = "test-call-id"
+    return await tool._run_async_impl(
+        args={}, tool_context=tool_context, credential=None
+    )
+
+  @pytest.mark.asyncio
+  async def test_error_flag_reaches_the_caller_as_is_error_camel_case(self):
+    """`isError` is the key callers read. A rename is a breaking change.
+
+    `_detect_error_in_response` already reads both spellings, so telemetry
+    survives a rename with no test failing. The caller's copy does not.
+    """
+    result = await self._run(
+        CallToolResult(
+            content=[TextContent(type="text", text="nope")], isError=True
+        )
+    )
+
+    assert "isError" in result
+    assert result["isError"] is True
+
+  @pytest.mark.asyncio
+  async def test_content_entries_keep_their_wire_names(self):
+    """The content list is handed to the model, so its keys are contractual."""
+    result = await self._run(
+        CallToolResult(content=[TextContent(type="text", text="hello")])
+    )
+
+    assert result["content"] == [{"type": "text", "text": "hello"}]
+
+  @pytest.mark.asyncio
+  async def test_no_snake_case_alias_leaks_alongside_the_camel_case_key(self):
+    """Both spellings at once would be worse than either alone.
+
+    A caller switching on `isError` and a caller switching on `is_error` would
+    both work, and the pair would outlive whichever migration introduced it.
+    """
+    result = await self._run(
+        CallToolResult(
+            content=[TextContent(type="text", text="nope")], isError=True
+        )
+    )
+
+    assert "is_error" not in result
