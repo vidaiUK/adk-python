@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# --- fork-local workaround for upstream commit 85b52f6a3.
-# That commit rewrote src/google/adk/agents/live_request_queue.py into a
-# backwards-compatibility shim that re-exports from `google.adk.live.
-# live_request_queue`, but the commit diff FAILED TO ADD the new
-# `src/google/adk/live/` package. Result: `from ..live.live_request_queue
-# import LiveRequestQueue` raises ModuleNotFoundError, taking down every
-# test that imports `InvocationContext`.
-#
-# Until upstream fixes their commit and ships the missing package, we
-# provide it here with the pre-refactor content, restored from
-# `85b52f6a3~1:src/google/adk/agents/live_request_queue.py`. When
-# upstream ships their `live/` package properly, our merge will bring
-# it in (with content conflicts we resolve by taking theirs); at that
-# point this fork-local file can be deleted along with this note.
+"""Live streaming and multimodal bidi execution module for ADK."""
+
+from __future__ import annotations
+
+from .live_request_queue import LiveRequest
+from .live_request_queue import LiveRequestQueue
+
+__all__ = [
+    'LiveRequest',
+    'LiveRequestQueue',
+]

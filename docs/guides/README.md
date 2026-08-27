@@ -33,6 +33,9 @@ This directory contains specific developer guides for the ADK Python implementat
 ### Integrations
 * [Model Armor](integrations/model_armor/index.md) - Screening user input and model output with Google Cloud Model Armor.
 
+### Labs
+* [AntigravityAgent](labs/antigravity/index.md) - Runs a Google Antigravity SDK agent as an ADK agent node.
+
 ### Memory
 * [BaseMemoryService](memory/memory_service/index.md) - Storing finished sessions and recalling them from later conversations.
 
