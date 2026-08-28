@@ -921,21 +921,24 @@ def test_llm_agent_config_minimal_defaults():
 # --- LoopAgentConfig round trip -----------------------------------------
 
 
-def test_loop_agent_config_max_iterations_reaches_the_agent(tmp_path: Path):
+@pytest.mark.parametrize("max_iterations", [3, 0])
+def test_loop_agent_config_max_iterations_reaches_the_agent(
+    tmp_path: Path, max_iterations: int
+):
   """max_iterations is LoopAgentConfig's only own field; it must round trip."""
   config_file = tmp_path / "loop.yaml"
   config_file.write_text(
       "agent_class: LoopAgent\n"
       "name: looper\n"
       "description: repeats its sub agents\n"
-      "max_iterations: 3\n"
+      f"max_iterations: {max_iterations}\n"
       "sub_agents: []\n"
   )
 
   agent = config_agent_utils.from_config(str(config_file))
 
   assert isinstance(agent, LoopAgent)
-  assert agent.max_iterations == 3
+  assert agent.max_iterations == max_iterations
 
 
 # --- resolve_callbacks ---------------------------------------------------

@@ -76,7 +76,7 @@ class LoopAgent(BaseAgent):
   """The maximum number of iterations to run the loop agent.
 
   If not set, the loop agent will run indefinitely until a sub-agent
-  escalates.
+  escalates. A value of zero or less runs the sub-agents no times at all.
   """
 
   @override
@@ -93,7 +93,7 @@ class LoopAgent(BaseAgent):
     should_exit = False
     pause_invocation = False
     while (
-        not self.max_iterations or times_looped < self.max_iterations
+        self.max_iterations is None or times_looped < self.max_iterations
     ) and not (should_exit or pause_invocation):
       for i in range(start_index, len(self.sub_agents)):
         sub_agent = self.sub_agents[i]
@@ -177,6 +177,6 @@ class LoopAgent(BaseAgent):
   ) -> Dict[str, Any]:
     if not isinstance(config, LoopAgentConfig):
       raise TypeError('LoopAgent requires a LoopAgentConfig.')
-    if config.max_iterations:
+    if config.max_iterations is not None:
       kwargs['max_iterations'] = config.max_iterations
     return kwargs

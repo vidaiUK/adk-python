@@ -493,3 +493,100 @@ async def test_advance_sequence_for_unprepared_path_leaves_other_barriers_alone(
 
   assert barrier.current_index == 0
   assert not barrier.events["beta@1"].is_set()
+
+
+def _ctx_over(events):
+  """A Context whose session holds `events`."""
+  ctx = MagicMock()
+  ctx._invocation_context = MagicMock()
+  ctx._invocation_context.invocation_id = "inv-1"
+  ctx._invocation_context.session = MagicMock()
+  ctx._invocation_context.session.events = events
+  return ctx
+
+
+def _index_snapshot(mgr):
+  """The index contents, keyed by parent path, as identity lists."""
+  return (
+      {k: [id(e) for e in v] for k, v in mgr._events_by_parent.items()},
+      {
+          k: [id(e) for e in v]
+          for k, v in mgr._transitive_events_by_parent.items()
+      },
+  )
+
+
+def test_extending_the_index_matches_a_full_rebuild() -> None:
+  """Indexing events in batches gives the same index as indexing them at once.
+
+  The session grows while a run is in flight, so the index is extended rather
+  than rebuilt on every append. That is only sound if the incremental result is
+  indistinguishable from the one-shot result.
+  """
+  events = [
+      _make_event(path="wf/a@1", output="a"),
+      _make_event(path="wf/b@1", output="b"),
+      _make_event(path="wf/b@1/deep@1", output="deep"),
+      _make_event(path="wf/c@1", output="c"),
+  ]
+
+  one_shot = ReplayManager()
+  one_shot._ensure_index(_ctx_over(list(events)))
+
+  incremental = ReplayManager()
+  growing: list = []
+  for event in events:
+    growing.append(event)
+    incremental._ensure_index(_ctx_over(growing))
+
+  assert _index_snapshot(incremental) == _index_snapshot(one_shot)
+
+
+def test_index_is_rebuilt_when_history_is_replaced() -> None:
+  """A rewind that keeps the event count must not leave a stale index.
+
+  Detecting staleness by event count alone would keep buckets pointing at
+  events the session no longer has.
+  """
+  original = [
+      _make_event(path="wf/a@1", output="a"),
+      _make_event(path="wf/b@1", output="b"),
+  ]
+  mgr = ReplayManager()
+  mgr._ensure_index(_ctx_over(original))
+
+  # Same length, different events -- as after a rewind or a compaction.
+  replaced = [
+      _make_event(path="wf/x@1", output="x"),
+      _make_event(path="wf/y@1", output="y"),
+  ]
+  mgr._ensure_index(_ctx_over(replaced))
+
+  indexed = {
+      id(e) for v in mgr._transitive_events_by_parent.values() for e in v
+  }
+  assert indexed == {id(e) for e in replaced}
+
+
+def test_interrupt_ownership_survives_an_incremental_update() -> None:
+  """A user reply indexed later still routes to the call indexed earlier.
+
+  Interrupt ownership used to be a local of the one-shot build; extending the
+  index in batches only works if it is carried across calls.
+  """
+  call = _make_event(path="wf/asker@1", interrupt_ids=["fc_1"])
+  mgr = ReplayManager()
+  mgr._ensure_index(_ctx_over([call]))
+
+  reply = _make_event(path="", invocation_id="inv-1")
+  reply.author = "user"
+  reply.content = MagicMock()
+  part = MagicMock()
+  part.function_response = MagicMock()
+  part.function_response.id = "fc_1"
+  reply.content.parts = [part]
+
+  mgr._ensure_index(_ctx_over([call, reply]))
+
+  # The reply is filed under the asker's parent path, not under root.
+  assert id(reply) in [id(e) for e in mgr._events_by_parent.get("wf", [])]
