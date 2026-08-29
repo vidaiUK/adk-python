@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 
 from ...agents.context import Context
+from ...events._branch_path import _BranchPath
 from ...events._node_path_builder import _NodePathBuilder
 from ...events.event import Event
 from ._rehydration_utils import _ChildScanState
@@ -147,6 +148,17 @@ class ReplayManager:
       if fr and fr.id and fr.id in fc_to_parent:
         parent = fc_to_parent[fr.id]
         if parent not in added_parents:
+          self._add_event_to_index(parent, event)
+          added_parents.add(parent)
+          matched = True
+
+    if event.branch:
+      # Match the branch's run ids exactly. A substring test on the raw branch
+      # string indexes the event under a parent whose function-call id merely
+      # happens to be contained in another id.
+      branch_run_ids = _BranchPath.from_string(event.branch).run_ids
+      for fid, parent in fc_to_parent.items():
+        if fid in branch_run_ids and parent not in added_parents:
           self._add_event_to_index(parent, event)
           added_parents.add(parent)
           matched = True

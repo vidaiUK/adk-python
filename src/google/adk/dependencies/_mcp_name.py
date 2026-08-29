@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-agent_class: Workflow
-name: root_agent
-edges:
-  - - START
-    - .agent.process_input
-    - generate_headline.yaml
-    - evaluate_headline.yaml
-    - .agent.route_headline
-  - - .agent.route_headline
-    - unrelated: generate_headline.yaml
+"""The MCP SDK's module name, as ADK's open-source build resolves it.
+
+Importing `_mcp.py` beside this file loads the SDK, which is several hundred
+modules. Code that only has to know whether the SDK is already loaded asks
+`sys.modules` for this name instead, and pays nothing.
+
+Like `_mcp.py`, this flavor must never name the internal copy.
+"""
+
+from __future__ import annotations
+
+SDK_MODULE_NAME = "mcp"

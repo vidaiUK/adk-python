@@ -148,6 +148,52 @@ def test_build_event_index_groups_events_by_parent_and_transitive_ancestors():
   assert e_user in mgr._transitive_events_by_parent["wf@1"]
 
 
+def test_build_event_index_matches_branch_run_ids_not_substrings():
+  """A branch places the event only under the parent owning its exact run id.
+
+  `fc-1` is a substring of `fc-10`, so a raw `in` test on the branch string
+  would file the event under both. The two calls sit on separate branches so
+  that their parent paths — what the index is keyed by — differ.
+  """
+  from google.genai import types
+
+  mgr = ReplayManager()
+  e_short = Event(
+      author="node",
+      node_info=NodeInfo(path="wf@1/branch_x@1/child_a@1"),
+      invocation_id="inv-1",
+      long_running_tool_ids=["fc-1"],
+  )
+  e_long = Event(
+      author="node",
+      node_info=NodeInfo(path="wf@1/branch_y@1/child_b@1"),
+      invocation_id="inv-1",
+      long_running_tool_ids=["fc-10"],
+  )
+  # Its own response id matches no call, so only the branch can place it.
+  e_user = Event(
+      author="user",
+      invocation_id="inv-1",
+      branch="wf@1.child_b@fc-10",
+      content=types.Content(
+          parts=[
+              types.Part(
+                  function_response=types.FunctionResponse(
+                      name="adk_request_input",
+                      id="resp-99",
+                      response={"result": "ok"},
+                  )
+              )
+          ]
+      ),
+  )
+
+  mgr._build_event_index([e_short, e_long, e_user], invocation_id="inv-1")
+
+  assert e_user in mgr._events_by_parent["wf@1/branch_y@1"]
+  assert e_user not in mgr._events_by_parent.get("wf@1/branch_x@1", [])
+
+
 def test_get_events_for_rehydration_lazily_builds_event_index():
   """Requesting rehydration events initializes event index when unbuilt."""
   mgr = ReplayManager()

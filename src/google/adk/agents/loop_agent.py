@@ -17,10 +17,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 from typing import AsyncGenerator
 from typing import ClassVar
-from typing import Dict
 from typing import Optional
 
 from typing_extensions import deprecated
@@ -165,18 +163,3 @@ class LoopAgent(BaseAgent):
   ) -> AsyncGenerator[Event, None]:
     raise NotImplementedError('This is not supported yet for LoopAgent.')
     yield  # AsyncGenerator requires having at least one yield statement
-
-  @override
-  @classmethod
-  @experimental(FeatureName.AGENT_CONFIG)
-  def _parse_config(
-      cls: type[LoopAgent],
-      config: BaseAgentConfig,
-      config_abs_path: str,
-      kwargs: Dict[str, Any],
-  ) -> Dict[str, Any]:
-    if not isinstance(config, LoopAgentConfig):
-      raise TypeError('LoopAgent requires a LoopAgentConfig.')
-    if config.max_iterations is not None:
-      kwargs['max_iterations'] = config.max_iterations
-    return kwargs

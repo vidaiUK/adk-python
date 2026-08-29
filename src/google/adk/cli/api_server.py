@@ -67,8 +67,6 @@ from watchdog.observers import Observer
 import yaml
 
 from ..agents.base_agent import BaseAgent
-from ..agents.live_request_queue import LiveRequest
-from ..agents.live_request_queue import LiveRequestQueue
 from ..agents.llm_agent import LlmAgent
 from ..agents.run_config import RunConfig
 from ..agents.run_config import StreamingMode
@@ -84,6 +82,8 @@ from ..events.event_actions import EventActions
 from ..flows.llm_flows.functions import REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
 from ..flows.llm_flows.functions import REQUEST_EUC_FUNCTION_CALL_NAME
 from ..flows.llm_flows.functions import REQUEST_INPUT_FUNCTION_CALL_NAME
+from ..live.live_request_queue import LiveRequest
+from ..live.live_request_queue import LiveRequestQueue
 from ..memory.base_memory_service import BaseMemoryService
 from ..plugins.base_plugin import BasePlugin
 from ..runners import Runner
