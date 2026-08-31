@@ -119,14 +119,19 @@ async def run_node_async(
       ic._event_queue = asyncio.Queue()  # pylint: disable=protected-access
 
       # 2. Append user message to session and resolve node_input
-      node_input = None
-      if resume_inputs or invocation_id:
-        node_input = runner._find_user_message_for_invocation(  # pylint: disable=protected-access
-            ic.session.events, ic.invocation_id
-        )
-        if node_input:
-          ic.user_content = node_input
-      if not node_input:
+      existing_user_content = (
+          runner._find_user_message_for_invocation(  # pylint: disable=protected-access
+              ic.session.events, ic.invocation_id
+          )
+          if (invocation_id or resume_inputs)
+          else None
+      )
+      if existing_user_content:
+        # Resume/retry: recover the original user content.
+        node_input = existing_user_content
+        ic.user_content = node_input
+      else:
+        # Fresh: use user message as node_input
         node_input = new_message
 
       # Failures in the setup hooks below (on_user_message_callback, the
@@ -137,8 +142,10 @@ async def run_node_async(
       run_error = None
       try:
         try:
-          # Run callbacks on user message
-          if new_message:
+          should_process_message = bool(
+              new_message and (resume_inputs or not existing_user_content)
+          )
+          if should_process_message:
             modified_user_message = (
                 await ic.plugin_manager.run_on_user_message_callback(
                     invocation_context=ic, user_message=new_message
@@ -146,10 +153,10 @@ async def run_node_async(
             )
             if modified_user_message is not None:
               new_message = modified_user_message
-              ic.user_content = new_message
+              if not resume_inputs:
+                ic.user_content = new_message
+                node_input = new_message
 
-          # Append user message to session for history
-          if new_message:
             user_event = await runner._append_user_event(  # pylint: disable=protected-access
                 ic, new_message, state_delta=state_delta
             )
