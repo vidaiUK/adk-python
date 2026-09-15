@@ -1611,11 +1611,18 @@ class RemoteA2aAgent(BaseAgent):
           )
           return
 
+        session_id = (
+            getattr(ctx.session, "id", None)
+            if self._config.forward_session_id_as_context_id
+            and ctx
+            and getattr(ctx, "session", None)
+            else None
+        )
         a2a_request = A2AMessage(
             message_id=platform_uuid.new_uuid(),
             parts=message_parts,
             role=_compat.ROLE_USER,
-            context_id=context_id,
+            context_id=context_id or session_id,
         )
 
       logger.debug(build_a2a_request_log(a2a_request))

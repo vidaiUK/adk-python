@@ -3421,6 +3421,7 @@ class TestRemoteA2aAgentMessageHandlingV2:
     self.mock_config.a2a_artifact_update_converter = Mock()
     self.mock_config.a2a_message_converter = Mock()
     self.mock_config.card_request_interceptors = None
+    self.mock_config.forward_session_id_as_context_id = False
 
     self.agent = RemoteA2aAgent(
         name="test_agent",
@@ -3997,6 +3998,138 @@ class TestRemoteA2aAgentExecution:
                     A2A_METADATA_PREFIX + "request"
                     in mock_event.custom_metadata
                 )
+
+  async def _run_context_id_test(
+      self,
+      mock_context_id: str | None,
+      expected_context_id: str | None,
+      *,
+      forward_session_id: bool = False,
+  ):
+    """Helper to test context_id handling in _run_async_impl.
+
+    Args:
+      mock_context_id: The context_id to return from
+        _construct_message_parts_from_session.
+      expected_context_id: The expected context_id in the A2AMessage.
+      forward_session_id: Value for forward_session_id_as_context_id config.
+    """
+    self.agent._config.forward_session_id_as_context_id = forward_session_id
+    with patch.object(self.agent, "_ensure_resolved") as mock_ensure_resolved:
+      with patch.object(
+          self.agent, "_create_a2a_request_for_user_function_response"
+      ) as mock_create_func:
+        mock_create_func.return_value = None
+
+        with patch.object(
+            self.agent, "_construct_message_parts_from_session"
+        ) as mock_construct:
+          mock_a2a_part = _compat.make_text_part("test")
+          mock_construct.return_value = ([mock_a2a_part], mock_context_id)
+
+          # Mock A2A client
+          mock_a2a_client = create_autospec(spec=A2AClient, instance=True)
+          mock_response = _make_stream_message(
+              A2AMessage(
+                  message_id="m1",
+                  role=_compat.ROLE_USER,
+                  parts=[mock_a2a_part],
+              )
+          )
+          mock_send_message = AsyncMock()
+          mock_send_message.__aiter__.return_value = [mock_response]
+          mock_a2a_client.send_message.return_value = mock_send_message
+          self.agent._a2a_client = mock_a2a_client
+          mock_ensure_resolved.return_value = mock_a2a_client
+
+          mock_event = Event(
+              author=self.agent.name,
+              invocation_id=self.mock_context.invocation_id,
+              branch=self.mock_context.branch,
+          )
+
+          with patch.object(self.agent, "_handle_a2a_response") as mock_handle:
+            mock_handle.return_value = mock_event
+
+            with patch(
+                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+            ) as mock_req_log:
+              with patch(
+                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+              ) as mock_resp_log:
+                mock_req_log.return_value = "Mock request log"
+                mock_resp_log.return_value = "Mock response log"
+
+                with patch(
+                    "google.adk.a2a._compat.a2a_to_dict",
+                    return_value={"k": "v"},
+                ):
+                  with patch(
+                      "google.adk.agents.remote_a2a_agent.A2AMessage"
+                  ) as mock_message_class:
+                    mock_message = Mock(spec=A2AMessage)
+                    mock_message_class.return_value = mock_message
+
+                    # Execute
+                    events = []
+                    async for event in self.agent._run_async_impl(
+                        self.mock_context
+                    ):
+                      events.append(event)
+
+                    # Verify A2AMessage was called with expected context_id
+                    mock_message_class.assert_called_once()
+                    call_kwargs = mock_message_class.call_args[1]
+                    assert call_kwargs["context_id"] == expected_context_id
+
+  @pytest.mark.asyncio
+  async def test_run_async_impl_does_not_forward_session_id_by_default(self):
+    """Test that session ID is not used as context_id by default.
+
+    When forward_session_id_as_context_id is False (default) and
+    _construct_message_parts_from_session returns None for context_id,
+    the agent should not set context_id.
+    """
+    await self._run_context_id_test(
+        mock_context_id=None,
+        expected_context_id=None,
+        forward_session_id=False,
+    )
+
+  @pytest.mark.asyncio
+  async def test_run_async_impl_uses_session_id_when_opted_in(self):
+    """Test that session ID is used as context_id when opted in.
+
+    When forward_session_id_as_context_id is True and
+    _construct_message_parts_from_session returns None for context_id,
+    the agent should use ctx.session.id to maintain session identity across
+    local and remote agents.
+    """
+    await self._run_context_id_test(
+        mock_context_id=None,
+        expected_context_id=self.mock_session.id,
+        forward_session_id=True,
+    )
+
+  @pytest.mark.asyncio
+  async def test_run_async_impl_preserves_existing_context_id(self):
+    """Test that existing context_id is preserved when available.
+
+    When _construct_message_parts_from_session returns a context_id from
+    a previous remote agent response, that context_id should be used
+    for conversation continuity regardless of forward_session_id_as_context_id.
+    """
+    existing_context_id = "existing-context-456"
+    await self._run_context_id_test(
+        mock_context_id=existing_context_id,
+        expected_context_id=existing_context_id,
+        forward_session_id=False,
+    )
+    await self._run_context_id_test(
+        mock_context_id=existing_context_id,
+        expected_context_id=existing_context_id,
+        forward_session_id=True,
+    )
 
   @pytest.mark.asyncio
   async def test_run_async_impl_closes_stream_when_abandoned(self):
@@ -5146,6 +5279,11 @@ class TestRemoteA2aAgentDeepcopy:
         copied_config.request_interceptors[0]
         is not config.request_interceptors[0]
     )
+
+    # Verify forward_session_id_as_context_id default and deepcopy
+    assert copied_config.forward_session_id_as_context_id is False
+    config.forward_session_id_as_context_id = True
+    assert copy.deepcopy(config).forward_session_id_as_context_id is True
 
 
 class TestFindFinishTaskArgsFromHistory:
@@ -6374,6 +6512,7 @@ def _make_agent():
 def _make_ctx(events):
   ctx = create_autospec(InvocationContext, instance=True)
   ctx.session = create_autospec(Session, instance=True)
+  ctx.session.id = "session-123"
   ctx.session.events = events
   ctx.invocation_id = "inv-1"
   ctx.branch = None
