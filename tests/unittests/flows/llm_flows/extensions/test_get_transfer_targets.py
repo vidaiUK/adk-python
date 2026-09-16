@@ -20,9 +20,9 @@ from google.adk.agents.llm_agent import Agent
 from google.adk.agents.loop_agent import LoopAgent
 from google.adk.agents.parallel_agent import ParallelAgent
 from google.adk.agents.sequential_agent import SequentialAgent
-from google.adk.flows.llm_flows.agent_transfer import _get_transfer_targets
+from google.adk.flows.llm_flows.extensions._agent_transfer import _get_transfer_targets
 
-from ... import testing_utils
+from .... import testing_utils
 
 
 def test_loop_agent_peer_does_not_raise_attribute_error():

@@ -31,19 +31,19 @@ from google.adk.code_executors.code_execution_utils import CodeExecutionInput
 from google.adk.code_executors.code_execution_utils import CodeExecutionResult
 from google.adk.code_executors.code_execution_utils import File
 from google.adk.code_executors.code_executor_context import CodeExecutorContext
-from google.adk.flows.llm_flows._code_execution import _DATA_FILE_HELPER_LIB
-from google.adk.flows.llm_flows._code_execution import _extract_and_replace_inline_files
-from google.adk.flows.llm_flows._code_execution import _get_data_file_preprocessing_code
-from google.adk.flows.llm_flows._code_execution import _NON_BUILTIN_EXECUTOR_INSTRUCTION
-from google.adk.flows.llm_flows._code_execution import get_content_as_bytes
-from google.adk.flows.llm_flows._code_execution import request_processor
-from google.adk.flows.llm_flows._code_execution import response_processor
+from google.adk.flows.llm_flows.extensions._code_execution import _DATA_FILE_HELPER_LIB
+from google.adk.flows.llm_flows.extensions._code_execution import _extract_and_replace_inline_files
+from google.adk.flows.llm_flows.extensions._code_execution import _get_data_file_preprocessing_code
+from google.adk.flows.llm_flows.extensions._code_execution import _NON_BUILTIN_EXECUTOR_INSTRUCTION
+from google.adk.flows.llm_flows.extensions._code_execution import get_content_as_bytes
+from google.adk.flows.llm_flows.extensions._code_execution import request_processor
+from google.adk.flows.llm_flows.extensions._code_execution import response_processor
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 import pytest
 
-from ... import testing_utils
+from .... import testing_utils
 
 
 class _ExecutionRecord:
@@ -80,7 +80,7 @@ class _RecordingCodeExecutor(BaseCodeExecutor):
 
 
 @pytest.mark.asyncio
-@patch('google.adk.flows.llm_flows._code_execution.datetime')
+@patch('google.adk.flows.llm_flows.extensions._code_execution.datetime')
 async def test_builtin_code_executor_image_artifact_creation(mock_datetime):
   """Test BuiltInCodeExecutor creates artifacts for images in response."""
   mock_now = datetime.datetime(2025, 1, 1, 12, 0, 0)
@@ -160,7 +160,7 @@ async def test_builtin_code_executor_image_artifact_creation(mock_datetime):
 
 
 @pytest.mark.asyncio
-@patch('google.adk.flows.llm_flows._code_execution.logger')
+@patch('google.adk.flows.llm_flows.extensions._code_execution.logger')
 async def test_logs_executed_code(mock_logger):
   """Test that the response processor logs the code it executes."""
   mock_code_executor = MagicMock(spec=BaseCodeExecutor)

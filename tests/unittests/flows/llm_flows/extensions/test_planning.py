@@ -22,8 +22,8 @@ from unittest.mock import patch
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.agents.llm_agent import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
-from google.adk.flows.llm_flows._nl_planning import request_processor
-from google.adk.flows.llm_flows._nl_planning import response_processor
+from google.adk.flows.llm_flows.extensions._planning import request_processor
+from google.adk.flows.llm_flows.extensions._planning import response_processor
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.planners.base_planner import BasePlanner
@@ -32,7 +32,7 @@ from google.adk.planners.plan_re_act_planner import PlanReActPlanner
 from google.genai import types
 import pytest
 
-from ... import testing_utils
+from .... import testing_utils
 
 
 @pytest.mark.asyncio

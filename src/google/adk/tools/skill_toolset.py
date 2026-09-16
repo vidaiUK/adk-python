@@ -75,6 +75,24 @@ _LOAD_SKILL_RESOURCE_TOOL_NAME = "load_skill_resource"
 _RUN_SKILL_SCRIPT_TOOL_NAME = "run_skill_script"
 
 
+def _activated_skills_state_key(agent_name: str) -> str:
+  """Returns the session state key holding an agent's activated skill names."""
+  return f"_adk_activated_skill_{agent_name}"
+
+
+def _read_activated_skills(state: Any, agent_name: str) -> list[str]:
+  """Returns a mutable copy of an agent's activated skill names."""
+  return list(state.get(_activated_skills_state_key(agent_name)) or [])
+
+
+def _write_activated_skills(
+    state: Any, agent_name: str, skill_names: list[str]
+) -> None:
+  """Stores an agent's activated skill names."""
+  # Assign rather than mutate in place so the state delta is recorded.
+  state[_activated_skills_state_key(agent_name)] = skill_names
+
+
 class SkillDiscoveryMode(Enum):
   """How the local skill catalog is disclosed to the model."""
 
@@ -389,12 +407,10 @@ class LoadSkillTool(BaseTool):
 
     # Record skill activation in agent state for tool resolution.
     agent_name = tool_context.agent_name
-    state_key = f"_adk_activated_skill_{agent_name}"
-
-    activated_skills = list(tool_context.state.get(state_key) or [])
+    activated_skills = _read_activated_skills(tool_context.state, agent_name)
     if skill_name not in activated_skills:
       activated_skills.append(skill_name)
-      tool_context.state[state_key] = activated_skills
+      _write_activated_skills(tool_context.state, agent_name, activated_skills)
 
     instructions = skill.instructions
     if skill.frontmatter.metadata.get("adk_inject_state"):
@@ -1484,9 +1500,9 @@ class SkillToolset(BaseToolset):
     if not readonly_context:
       return []
 
-    agent_name = readonly_context.agent_name
-    state_key = f"_adk_activated_skill_{agent_name}"
-    activated_skills = readonly_context.state.get(state_key) or []
+    activated_skills = _read_activated_skills(
+        readonly_context.state, readonly_context.agent_name
+    )
 
     if not activated_skills:
       return []
@@ -1599,6 +1615,80 @@ class SkillToolset(BaseToolset):
   def skills(self) -> list[models.Skill]:
     """Returns the list of available skills."""
     return self._list_skills()
+
+  def list_active_skills(self, ctx: ReadonlyContext) -> list[str]:
+    """Returns the skills active for `ctx`'s agent, oldest activation first.
+
+    Args:
+      ctx: A context for the running agent. `ToolContext` is one.
+
+    Returns:
+      The active skill names. Activation is recorded by name, so a name here
+      is not guaranteed to still resolve against the registry.
+    """
+    return _read_activated_skills(ctx.state, ctx.agent_name)
+
+  async def load_skill(self, ctx: ToolContext, skill_name: str) -> bool:
+    """Activates a skill for `ctx`'s agent without going through the model.
+
+    Activation is what registers the skill's `adk_additional_tools`. Unlike the
+    `load_skill` tool, this does not put the skill's instructions into the
+    conversation: the model gets the tools without being told what they are
+    for, so supply that guidance yourself.
+
+    Args:
+      ctx: A context for the running agent, e.g. the `ToolContext` a tool or
+        callback was handed.
+      skill_name: The skill to activate.
+
+    Returns:
+      True if the skill was activated, False if it already was. An already
+      active skill is reported without consulting the registry, so this works
+      for one that has since been removed from it.
+
+    Raises:
+      ValueError: If no such skill is available locally or in the registry.
+      Exception: Whatever the registry raises if the lookup itself fails.
+    """
+    activated_skills = _read_activated_skills(ctx.state, ctx.agent_name)
+    if skill_name in activated_skills:
+      return False
+
+    skill = await self._get_or_fetch_skill(skill_name, ctx.invocation_id)
+    if skill is None:
+      raise ValueError(f"Skill '{skill_name}' not found.")
+
+    # The fetch suspends, so re-read: a concurrent activation may have written
+    # the list since. Appending to the stale copy would drop its entry.
+    activated_skills = _read_activated_skills(ctx.state, ctx.agent_name)
+    if skill_name in activated_skills:
+      return False
+    activated_skills.append(skill_name)
+    _write_activated_skills(ctx.state, ctx.agent_name, activated_skills)
+    return True
+
+  def unload_skill(self, ctx: ToolContext, skill_name: str) -> bool:
+    """Deactivates a skill for `ctx`'s agent, releasing its dynamic tools.
+
+    The skill's instructions stay in the conversation history; only its tools
+    and its activation record go away. Synchronous, unlike `load_skill`,
+    because deactivation never consults the registry — so it also works for a
+    skill that has since been removed from one.
+
+    Args:
+      ctx: A context for the running agent, e.g. the `ToolContext` a tool or
+        callback was handed.
+      skill_name: The skill to deactivate.
+
+    Returns:
+      True if the skill was deactivated, False if it was not active.
+    """
+    activated_skills = _read_activated_skills(ctx.state, ctx.agent_name)
+    if skill_name not in activated_skills:
+      return False
+    activated_skills.remove(skill_name)
+    _write_activated_skills(ctx.state, ctx.agent_name, activated_skills)
+    return True
 
   def clone_with_updated_skills(
       self, skills: list[models.Skill]

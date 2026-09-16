@@ -26,7 +26,7 @@ from google.adk.agents.invocation_context import InvocationContext
 from google.adk.agents.llm_agent import Agent
 from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactService
 from google.adk.events.event import Event
-from google.adk.flows.llm_flows import agent_transfer
+from google.adk.flows.llm_flows.extensions import _agent_transfer as agent_transfer
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.models.llm_request import LlmRequest
 from google.adk.plugins.plugin_manager import PluginManager
@@ -35,7 +35,7 @@ from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.genai import types
 import pytest
 
-from ... import testing_utils
+from .... import testing_utils
 
 
 class _NonLlmAgent(BaseAgent):

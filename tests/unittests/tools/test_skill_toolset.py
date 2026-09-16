@@ -3462,3 +3462,210 @@ async def test_process_llm_request_with_bare_autospec_context(mock_skill1):
   llm_req.append_instructions.assert_called_once_with(
       [skill_toolset.DEFAULT_SKILL_SYSTEM_INSTRUCTION]
   )
+
+
+# Programmatic activation API tests
+
+
+@pytest.fixture(name="stateful_context")
+def _stateful_context():
+  """A tool context whose state is a real dict, not a mock."""
+  ctx = mock.create_autospec(tool_context.ToolContext, instance=True)
+  ctx.agent_name = "test_agent"
+  ctx.invocation_id = "test_invocation"
+  ctx.state = {}
+  return ctx
+
+
+def test_list_active_skills_empty(mock_skill1, stateful_context):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  assert toolset.list_active_skills(stateful_context) == []
+
+
+def test_list_active_skills_returns_activation_order(
+    mock_skill1, mock_skill2, stateful_context
+):
+  toolset = skill_toolset.SkillToolset([mock_skill1, mock_skill2])
+  stateful_context.state["_adk_activated_skill_test_agent"] = [
+      "skill2",
+      "skill1",
+  ]
+
+  assert toolset.list_active_skills(stateful_context) == ["skill2", "skill1"]
+
+
+def test_list_active_skills_does_not_alias_state(mock_skill1, stateful_context):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  stateful_context.state["_adk_activated_skill_test_agent"] = ["skill1"]
+
+  toolset.list_active_skills(stateful_context).append("skill2")
+
+  assert toolset.list_active_skills(stateful_context) == ["skill1"]
+
+
+def test_list_active_skills_is_per_agent(mock_skill1, stateful_context):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  stateful_context.state["_adk_activated_skill_other_agent"] = ["skill1"]
+
+  assert toolset.list_active_skills(stateful_context) == []
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_activates(mock_skill1, stateful_context):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+
+  assert await toolset.load_skill(stateful_context, "skill1") is True
+  assert stateful_context.state["_adk_activated_skill_test_agent"] == ["skill1"]
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_is_idempotent(mock_skill1, stateful_context):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  await toolset.load_skill(stateful_context, "skill1")
+
+  assert await toolset.load_skill(stateful_context, "skill1") is False
+  assert stateful_context.state["_adk_activated_skill_test_agent"] == ["skill1"]
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_skips_registry_when_already_active(
+    mock_registry, stateful_context
+):
+  mock_registry.get_skill.side_effect = RuntimeError("registry is down")
+  toolset = skill_toolset.SkillToolset([], registry=mock_registry)
+  stateful_context.state["_adk_activated_skill_test_agent"] = ["gone"]
+
+  assert await toolset.load_skill(stateful_context, "gone") is False
+  mock_registry.get_skill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_propagates_registry_error(
+    mock_registry, stateful_context
+):
+  mock_registry.get_skill.side_effect = RuntimeError("registry is down")
+  toolset = skill_toolset.SkillToolset([], registry=mock_registry)
+
+  with pytest.raises(RuntimeError, match="registry is down"):
+    await toolset.load_skill(stateful_context, "skill2")
+
+  assert "_adk_activated_skill_test_agent" not in stateful_context.state
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_concurrent_activations_both_recorded(
+    mock_registry, mock_skill1, mock_skill2, stateful_context
+):
+  """Both activations survive when two loads interleave over the fetch await."""
+
+  async def slow_get_skill(name):
+    await asyncio.sleep(0)
+    return mock_skill1 if name == "skill1" else mock_skill2
+
+  mock_registry.get_skill.side_effect = slow_get_skill
+  toolset = skill_toolset.SkillToolset([], registry=mock_registry)
+
+  results = await asyncio.gather(
+      toolset.load_skill(stateful_context, "skill1"),
+      toolset.load_skill(stateful_context, "skill2"),
+  )
+
+  assert results == [True, True]
+  assert sorted(toolset.list_active_skills(stateful_context)) == [
+      "skill1",
+      "skill2",
+  ]
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_raises_for_unknown_skill(
+    mock_skill1, stateful_context
+):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+
+  with pytest.raises(ValueError, match="Skill 'nope' not found."):
+    await toolset.load_skill(stateful_context, "nope")
+
+  assert "_adk_activated_skill_test_agent" not in stateful_context.state
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_falls_back_to_registry(
+    mock_registry, mock_skill2, stateful_context
+):
+  mock_registry.get_skill.return_value = mock_skill2
+  toolset = skill_toolset.SkillToolset([], registry=mock_registry)
+
+  assert await toolset.load_skill(stateful_context, "skill2") is True
+  assert toolset.list_active_skills(stateful_context) == ["skill2"]
+
+
+@pytest.mark.asyncio
+async def test_load_skill_api_registers_additional_tools(
+    mock_skill1, mock_skill1_frontmatter, stateful_context
+):
+  mock_skill1_frontmatter.metadata = {"adk_additional_tools": ["my_tool"]}
+  custom_tool = mock.create_autospec(skill_toolset.BaseTool, instance=True)
+  custom_tool.name = "my_tool"
+  toolset = skill_toolset.SkillToolset(
+      [mock_skill1], additional_tools=[custom_tool]
+  )
+
+  assert "my_tool" not in {
+      t.name for t in await toolset.get_tools(stateful_context)
+  }
+
+  await toolset.load_skill(stateful_context, "skill1")
+
+  assert "my_tool" in {
+      t.name for t in await toolset.get_tools(stateful_context)
+  }
+
+
+@pytest.mark.asyncio
+async def test_unload_skill_api_releases_additional_tools(
+    mock_skill1, mock_skill1_frontmatter, stateful_context
+):
+  mock_skill1_frontmatter.metadata = {"adk_additional_tools": ["my_tool"]}
+  custom_tool = mock.create_autospec(skill_toolset.BaseTool, instance=True)
+  custom_tool.name = "my_tool"
+  toolset = skill_toolset.SkillToolset(
+      [mock_skill1], additional_tools=[custom_tool]
+  )
+  await toolset.load_skill(stateful_context, "skill1")
+
+  assert toolset.unload_skill(stateful_context, "skill1") is True
+
+  assert toolset.list_active_skills(stateful_context) == []
+  assert "my_tool" not in {
+      t.name for t in await toolset.get_tools(stateful_context)
+  }
+
+
+def test_unload_skill_api_returns_false_when_not_active(
+    mock_skill1, stateful_context
+):
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+
+  assert toolset.unload_skill(stateful_context, "skill1") is False
+
+
+def test_unload_skill_api_works_for_skill_not_in_registry(stateful_context):
+  toolset = skill_toolset.SkillToolset([])
+  stateful_context.state["_adk_activated_skill_test_agent"] = ["gone"]
+
+  assert toolset.unload_skill(stateful_context, "gone") is True
+  assert toolset.list_active_skills(stateful_context) == []
+
+
+def test_unload_skill_api_leaves_other_skills_active(
+    mock_skill1, mock_skill2, stateful_context
+):
+  toolset = skill_toolset.SkillToolset([mock_skill1, mock_skill2])
+  stateful_context.state["_adk_activated_skill_test_agent"] = [
+      "skill1",
+      "skill2",
+  ]
+
+  assert toolset.unload_skill(stateful_context, "skill1") is True
+  assert toolset.list_active_skills(stateful_context) == ["skill2"]

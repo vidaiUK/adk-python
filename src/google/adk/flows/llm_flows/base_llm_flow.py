@@ -31,7 +31,6 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace
 
 from . import _live_llm_flow
-from . import _output_schema_processor
 from . import functions
 from ...agents._streaming_mode import StreamingMode
 from ...agents.base_agent import BaseAgent
@@ -61,6 +60,7 @@ from ._model_response_finalizer import run_and_handle_error
 from ._resume_utils import decide_step_resume
 from ._resume_utils import ResumeAction
 from .functions import build_auth_request_event
+from .prompt import _schema as _output_schema_processor
 
 # Prefix used by toolset auth credential IDs
 TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_'
@@ -238,7 +238,7 @@ async def _process_agent_tools(
     return
   agent = cast('LlmAgent', raw_agent)
 
-  from .agent_transfer import _get_transfer_targets
+  from .extensions._agent_transfer import _get_transfer_targets
 
   multiple_tools = len(agent.tools) > 1 or bool(_get_transfer_targets(agent))
   model = agent.canonical_model
@@ -747,7 +747,7 @@ class BaseLlmFlow(ABC):
 
     from google.adk.agents.llm_agent import LlmAgent
 
-    from .agent_transfer import _get_transfer_targets
+    from .extensions._agent_transfer import _get_transfer_targets
 
     # Restrict transfers to declared targets (or itself) to prevent
     # unauthorized escalation. The agent that runs is taken from those
