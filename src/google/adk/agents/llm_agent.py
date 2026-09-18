@@ -56,8 +56,10 @@ from ..tools.tool_context import ToolContext
 from ..utils._callback_pipeline import _normalize_callbacks
 from ..utils._schema_utils import SchemaType
 from ..utils._schema_utils import validate_schema
+from ..utils.content_utils import extract_text_from_content
 from ..utils.context_utils import Aclosing
 from ..utils.instructions_utils import InstructionProvider as InstructionProvider
+from ..workflow._base_node import BaseNode
 from .base_agent import BaseAgent
 from .base_agent import BaseAgentState
 from .base_agent_config import BaseAgentConfig as BaseAgentConfig
@@ -143,6 +145,21 @@ OnToolErrorCallback: TypeAlias = Union[
 ToolUnion: TypeAlias = Union[Callable, BaseTool, BaseToolset]  # type: ignore[type-arg]
 
 
+def _wrap_base_node_as_tool(node: BaseNode) -> BaseTool:
+  """Wraps a BaseNode into a NodeTool while rejecting direct BaseAgent usage."""
+  from ..tools._node_tool import NodeTool
+
+  if isinstance(node, BaseAgent):
+    raise ValueError(
+        f"Agent '{node.name}' cannot be used directly as a tool. Agents"
+        ' should be invoked as sub-agents.'
+    )
+  return NodeTool(
+      node=node,
+      description=node.description,
+  )
+
+
 async def _convert_tool_union_to_tools(
     tool_union: ToolUnion,
     ctx: Optional[ReadonlyContext],
@@ -190,22 +207,7 @@ async def _convert_tool_union_to_tools(
   from ..workflow._base_node import BaseNode
 
   if isinstance(tool_union, BaseNode):
-    from ..tools._node_tool import NodeTool
-    from .base_agent import BaseAgent
-
-    if isinstance(tool_union, BaseAgent):
-      raise ValueError(
-          f"Agent '{tool_union.name}' cannot be used directly as a tool. Agents"
-          ' should be invoked as sub-agents.'
-      )
-
-    return [
-        NodeTool(
-            node=tool_union,
-            name=tool_union.name,
-            description=tool_union.description,
-        )
-    ]
+    return [_wrap_base_node_as_tool(tool_union)]
 
   if isinstance(tool_union, BaseTool):
     return [tool_union]
@@ -1106,18 +1108,20 @@ class LlmAgent(BaseAgent, abc.ABC):
       if not has_text_part:
         return
 
-      result = ''.join(
-          part.text
-          for part in event.content.parts
-          if part.text and not part.thought
-      )
+      result: Any = extract_text_from_content(event.content)
       if self.output_schema:
         # If the result from the final chunk is just whitespace or empty,
         # it means this is an empty final chunk of a stream.
         # Do not attempt to parse it as JSON.
         if not result.strip():
           return
-        result = validate_schema(self.output_schema, result)
+        if (
+            validated_output := getattr(event, '_validated_output', None)
+        ) is not None:
+          result = validated_output
+        else:
+          result = validate_schema(self.output_schema, result)
+          object.__setattr__(event, '_validated_output', result)
       event.actions.state_delta[self.output_key] = result
 
   def __maybe_accumulate_streaming_output(
@@ -1255,27 +1259,13 @@ class LlmAgent(BaseAgent, abc.ABC):
   @classmethod
   def _pre_validate_tools(cls, data: Any) -> Any:
     if isinstance(data, dict) and 'tools' in data and data['tools']:
-      from google.adk.agents.base_agent import BaseAgent
-      from google.adk.tools._node_tool import NodeTool
       from google.adk.workflow._base_node import BaseNode
 
-      new_tools = []
-      for t in data['tools']:
-        if isinstance(t, BaseAgent):
-          raise ValueError(
-              f"Agent '{t.name}' cannot be used directly as a tool. Agents"
-              ' should be invoked as sub-agents.'
-          )
-        elif isinstance(t, BaseNode):
-          new_tools.append(NodeTool(node=t, description=t.description))
-        else:
-          new_tools.append(t)
-      data['tools'] = new_tools
+      data['tools'] = [
+          _wrap_base_node_as_tool(t) if isinstance(t, BaseNode) else t
+          for t in data['tools']
+      ]
     return data
-
-  @model_validator(mode='after')
-  def __model_validator_after(self) -> LlmAgent:
-    return self
 
   @field_validator('generate_content_config', mode='after')
   @classmethod
